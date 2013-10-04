@@ -7,11 +7,14 @@
 #include <signal.h>
 #include "proc.h"
 
+extern int in_cif_interrupt;
+
 /*===========================================================================*
  *				exception				     *
  *===========================================================================*/
-PUBLIC void exception(vec_nr)
+PUBLIC void exception(vec_nr, errno)
 unsigned vec_nr;
+unsigned errno;
 {
 /* An exception or unexpected interrupt has occurred. */
 
@@ -45,11 +48,30 @@ unsigned vec_nr;
   /* Save proc_ptr, because it may be changed by debug statements. */
   saved_proc = proc_ptr;	
 
+  xen_kprintf("Exception: %x   proc_addr: %x\n", vec_nr, saved_proc);
+  xen_kprintf("pc = %x:0x%x\n", (unsigned) saved_proc->p_reg.cs,
+	      (unsigned) saved_proc->p_reg.pc);
+  xen_kprintf("ss = %x\n", saved_proc->p_reg.ss);
+  xen_kprintf("gs = %x\n", saved_proc->p_reg.gs);
+  xen_kprintf("fs = %x\n", saved_proc->p_reg.fs);
+  xen_kprintf("es = %x\n", saved_proc->p_reg.es);
+  xen_kprintf("ds = %x\n", saved_proc->p_reg.ds);
+  xen_kprintf("di = %x\n", saved_proc->p_reg.di);
+  xen_kprintf("si = %x\n", saved_proc->p_reg.si);
+  xen_kprintf("fp = %x\n", saved_proc->p_reg.fp);
+  xen_kprintf("st = %x\n", saved_proc->p_reg.st);
+  xen_kprintf("bx = %x\n", saved_proc->p_reg.bx);
+  xen_kprintf("dx = %x\n", saved_proc->p_reg.dx);
+  xen_kprintf("cx = %x\n", saved_proc->p_reg.cx);
+  xen_kprintf("ax = %x\n", saved_proc->p_reg.retreg);
+  xen_kprintf("k_callback %x\n", k_callback);
+  xen_kprintf("in_cif_interrupt %x\n", in_cif_interrupt);
+
   ep = &ex_data[vec_nr];
 
-  if (vec_nr == 2) {		/* spurious NMI on some machines */
-	kprintf("got spurious NMI\n");
-	return;
+  if (vec_nr == 2) {	/* spurious NMI on some machines */
+    xen_kprintf("got spurious NMI\n");
+    return;
   }
 
   /* If an exception occurs while running a process, the k_reenter variable 
@@ -63,14 +85,14 @@ unsigned vec_nr;
 
   /* Exception in system code. This is not supposed to happen. */
   if (ep->msg == NIL_PTR || machine.processor < ep->minprocessor)
-	kprintf("\nIntel-reserved exception %d\n", vec_nr);
+    xen_kprintf("\nIntel-reserved exception %d\n", vec_nr);
   else
-	kprintf("\n%s\n", ep->msg);
-  kprintf("k_reenter = %d ", k_reenter);
-  kprintf("process %d (%s), ", proc_nr(saved_proc), saved_proc->p_name);
-  kprintf("pc = %u:0x%x", (unsigned) saved_proc->p_reg.cs,
-  (unsigned) saved_proc->p_reg.pc);
+    xen_kprintf("\n%s\n", ep->msg);
+  xen_kprintf("k_reenter = %d ", k_reenter);
+  xen_kprintf("process %d (%s), ", proc_nr(saved_proc),
+	      saved_proc->p_name);
+  xen_kprintf("pc = %u:0x%x", (unsigned) saved_proc->p_reg.cs,
+	      (unsigned) saved_proc->p_reg.pc);
 
   panic("exception in a kernel task", NO_NUM);
 }
-

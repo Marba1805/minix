@@ -61,8 +61,10 @@
 /* Disable/ enable hardware interrupts. The parameters of lock() and unlock()
  * are used when debugging is enabled. See debug.h for more information.
  */
-#define lock(c, v)	intr_disable(); 
+/*#define lock(c, v)	intr_disable(); 
 #define unlock(c)	intr_enable(); 
+*/
+
 
 /* Sizes of memory tables. The boot monitor distinguishes three memory areas, 
  * namely low mem below 1M, 1M-16M, and mem after 16M. More chunks are needed

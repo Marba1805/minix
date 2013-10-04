@@ -478,7 +478,11 @@ tty_t *tp;
   int line;
 
   /* Associate PTY and TTY structures. */
-  line = tp - &tty_table[NR_CONS + NR_RS_LINES];
+  line = tp - &tty_table[NR_CONS + NR_XEN_CONS + NR_RS_LINES];
+  pp = tp->tty_priv = &pty_table[line];
+  pp->tty = tp;
+  pp->select_ops = 0;
+
   pp = tp->tty_priv = &pty_table[line];
   pp->tty = tp;
   pp->select_ops = 0;

@@ -10,12 +10,12 @@ s = system
 CC =	exec cc
 CPP =	$l/cpp
 LD =	$(CC) -.o
-CFLAGS = -I$i 
-LDFLAGS = -i 
+CFLAGS = -I$i -g
+LDFLAGS = -i -g
 
 HEAD =	mpx.o
 OBJS =	start.o protect.o klib.o table.o main.o proc.o \
-	i8259.o exception.o system.o clock.o utility.o debug.o
+	exception.o system.o clock.o utility.o debug.o xen.o evtchn.o ctrl_if.o
 SYSTEM = system.a
 LIBS = -ltimers 
 
@@ -38,7 +38,7 @@ depend:
 	/usr/bin/mkdep "$(CC) -E $(CPPFLAGS)" *.c *.s > .depend
 
 # Include generated dependencies.
-klib.o:	klib386.s klib88.s
-mpx.o:	mpx386.s mpx88.s
+klib.o:	klib386.s klib88.s klibxen.s
+mpx.o:	mpx386.s mpx88.s mpxxen.s
 include .depend
 

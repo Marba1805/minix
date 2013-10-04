@@ -26,11 +26,11 @@ PSWREG		=	CSREG + W
 SPREG		=	PSWREG + W
 SSREG		=	SPREG + W
 P_STACKTOP	=	SSREG + W
-P_LDT_SEL	=	P_STACKTOP
-P_LDT		=	P_LDT_SEL + W
+P_CS_IDX	=	P_STACKTOP
+P_DS_IDX	=	P_CS_IDX + W
 
 #if _WORD_SIZE == 2
 Msize		=	12		! size of a message in 16-bit words
 #else
-Msize		=	9		! size of a message in 32-bit words
+Msize		=	18		! size of a message in 32-bit words
 #endif

@@ -18,9 +18,10 @@ struct proc {
   struct stackframe_s p_reg;	/* process' registers saved in stack frame */
 
 #if (CHIP == INTEL)
-  reg_t p_ldt_sel;		/* selector in gdt with ldt base and limit */
-  struct segdesc_s p_ldt[2+NR_REMOTE_SEGS]; /* CS, DS and remote segments */
-#endif 
+  u16_t p_cs_idx;		/* index in gdt for processes code segment */
+  u16_t p_ds_idx;		/* index in gdt for processes data segment */
+  u16_t p_extra_idx;	/* index of first extra segment */
+#endif
 
 #if (CHIP == M68000)
 /* M68000 specific registers and FPU details go here. */

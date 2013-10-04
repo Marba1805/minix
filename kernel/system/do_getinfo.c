@@ -10,6 +10,8 @@
  */
 
 #include "../system.h"
+#include <xen/xenasm.h>
+#include <xen/xen.h>
 
 static unsigned long bios_buf[1024];	/* 4K, what about alignment */
 static vir_bytes bios_buf_vir, bios_buf_len;
@@ -20,15 +22,17 @@ static vir_bytes bios_buf_vir, bios_buf_len;
  *			        do_getinfo				     *
  *===========================================================================*/
 PUBLIC int do_getinfo(m_ptr)
-register message *m_ptr;	/* pointer to request message */
+message *m_ptr;			/* pointer to request message */
 {
 /* Request system information to be copied to caller's address space. This
  * call simply copies entire data structures to the caller.
  */
   size_t length;
+  int foo;
   phys_bytes src_phys; 
   phys_bytes dst_phys; 
-  int proc_nr, nr;
+  int proc_nr, nr, paddr, maddr;
+  start_info_t *si = &hypervisor_start_info->start_info;
 
   /* Set source address and length based on request type. */
   switch (m_ptr->I_REQUEST) {	
@@ -40,12 +44,15 @@ register message *m_ptr;	/* pointer to request message */
     case GET_KINFO: {
         length = sizeof(struct kinfo);
         src_phys = vir2phys(&kinfo);
-        break;
+	break;
     }
-    case GET_IMAGE: {
-        length = sizeof(struct boot_image) * NR_BOOT_PROCS;
-        src_phys = vir2phys(image);
-        break;
+    case GET_IMAGE:{
+      foo = sizeof(struct boot_image);
+      length =
+	sizeof(struct boot_image) * (NR_BOOT_PROCS);
+
+      src_phys = vir2phys(image);
+      break;
     }
     case GET_IRQHOOKS: {
         length = sizeof(struct irq_hook) * NR_IRQ_HOOKS;
@@ -73,14 +80,33 @@ register message *m_ptr;	/* pointer to request message */
     case GET_PRIVTAB: {
         length = sizeof(struct priv) * (NR_SYS_PROCS);
         src_phys = vir2phys(priv);
-        break;
+	break;
     }
-    case GET_PROC: {
-        nr = (m_ptr->I_VAL_LEN2 == SELF) ? m_ptr->m_source : m_ptr->I_VAL_LEN2;
-        if (! isokprocn(nr)) return(EINVAL);	/* validate request */
-        length = sizeof(struct proc);
-        src_phys = vir2phys(proc_addr(nr));
-        break;
+    case GET_PROC:{
+      nr = (m_ptr->I_VAL_LEN2 ==
+	    SELF) ? m_ptr->m_source : m_ptr->I_VAL_LEN2;
+      if (!isokprocn(nr))
+	return (EINVAL);	/* validate request */
+      length = sizeof(struct proc);
+      src_phys = vir2phys(proc_addr(nr));
+      break;
+    }
+    case GET_VTOM:{
+      paddr = m_ptr->I_VAL_LEN2;
+      proc_nr = m_ptr->m_source;	/* only caller can request copy */
+      paddr =
+	numap_local(proc_nr,
+		    (vir_bytes) m_ptr->I_VAL_LEN2,
+		    sizeof(long)) >> PAGE_SHIFT;
+      maddr = *((unsigned long *) si->mfn_list + paddr) << PAGE_SHIFT;
+      xen_kprintf("paddr: 0x%x\n", paddr);
+      xen_kprintf("vaddr: 0x%x\n", maddr);
+
+      length = sizeof(long);
+      src_phys = vir2phys(&maddr);
+      /*			    vir2phys(((unsigned long *) si->mfn_list +
+				    paddr));*/
+      break;
     }
     case GET_MONPARAMS: {
         src_phys = kinfo.params_base;		/* already is a physical */

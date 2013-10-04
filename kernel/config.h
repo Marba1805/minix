@@ -31,7 +31,7 @@
 #define USE_SETALARM	   1	/* schedule a synchronous alarm */
 #define USE_DEVIO      	   1	/* read or write a single I/O port */
 #define USE_VDEVIO     	   1	/* process vector with I/O requests */
-#define USE_SDEVIO     	   1	/* perform I/O request on a buffer */
+#define USE_SDEVIO     	   0	/* perform I/O request on a buffer */
 #define USE_IRQCTL     	   1	/* set an interrupt policy */
 #define USE_SEGCTL     	   1	/* set up a remote segment */
 #define USE_PRIVCTL    	   1	/* system privileges control */
@@ -70,14 +70,14 @@
 #define VCOPY_VEC_SIZE    16		/* max elements per VCOPY request */
 
 /* How many bytes for the kernel stack. Space allocated in mpx.s. */
-#define K_STACK_BYTES   1024	
+#define K_STACK_BYTES   4096
 
 /* This section allows to enable kernel debugging and timing functionality.
  * For normal operation all options should be disabled.
  */
 #define DEBUG_SCHED_CHECK  0	/* sanity check of scheduling queues */
-#define DEBUG_LOCK_CHECK   0	/* kernel lock() sanity check */
-#define DEBUG_TIME_LOCKS   0	/* measure time spent in locks */
+#define DEBUG_LOCK_CHECK   1	/* kernel lock() sanity check */
+#define DEBUG_TIME_LOCKS   1	/* measure time spent in locks */
 
 #endif /* CONFIG_H */
 

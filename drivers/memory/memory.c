@@ -67,6 +67,44 @@ PRIVATE char dev_zero[ZERO_BUF_SIZE];
 #define click_to_round_k(n) \
 	((unsigned) ((((unsigned long) (n) << CLICK_SHIFT) + 512) / 1024))
 
+
+int buf_count = 0;		/* # characters in the buffer */
+char print_buf[80];		/* output is buffered here */
+
+void kputc(c)
+int c;
+{
+	/* Accumulate another character.  If 0 or buffer full, print it. */
+	message m;
+
+	if ((c == 0 && buf_count > 0) || buf_count == sizeof(print_buf)) {
+		int procs[] = OUTPUT_PROCS_ARRAY;
+		int p;
+
+		for (p = 0; procs[p] != NONE; p++) {
+			/* Send the buffer to this output driver. */
+			m.DIAG_BUF_COUNT = buf_count;
+			m.DIAG_PRINT_BUF = print_buf;
+			m.DIAG_PROC_NR = SELF;
+			m.m_type = DIAGNOSTICS;
+
+			(void) _sendrec(procs[p], &m);
+
+		}
+		buf_count = 0;
+
+		/* If the output fails, e.g., due to an ELOCKED, do not retry output
+		 * at the FS as if this were a normal user-land printf(). This may
+		 * result in even worse problems.
+		 */
+	}
+
+	if (c != 0) {
+		/* Append a single character to the output buffer. */
+		print_buf[buf_count++] = c;
+	}
+}
+
 /*===========================================================================*
  *				   main 				     *
  *===========================================================================*/

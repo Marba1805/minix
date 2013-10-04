@@ -1,77 +1,114 @@
-# Master Makefile to compile everything in /usr/src except the system.
+CVSROOT=:pserver:anoncvs:@bleurgh.com:/var/lib/cvs
 
-MAKE	= exec make -$(MAKEFLAGS)
-GMAKE	= /usr/gnu/bin/gmake
+KERNELMODULE=minix/kernel
+KERNELSAVEAS=kernel
 
-usage:
-	@echo "" 
-	@echo "Master Makefile for MINIX commands and utilities." 
-	@echo "Root privileges are required for some actions." 
-	@echo "" 
-	@echo "Usage:" 
-	@echo "	make world      # Compile everything (libraries & commands)" 
-	@echo "	make includes   # Install include files from src/" 
-	@echo "	make libraries  # Compile and install libraries" 
-	@echo "	make cmds       # Compile all, commands, but don't install" 
-	@echo "	make install    # Compile and install commands" 
-	@echo "	make depend     # Generate required .depend files" 
-	@echo "	make clean      # Remove all compiler results" 
-	@echo "" 
-	@echo "Run 'make' in tools/ to create a new MINIX configuration." 
-	@echo "" 
-	@echo "Rebuilding the libraries uses gmake and gcc too, which takes" 
-	@echo "a lot of memory currently. See src/lib/ackonly/README for" 
-	@echo "more information." 
-	@echo "" 
+HEADERMODULE=minix/include
+HEADERSAVEAS=include
 
-# world has to be able to make a new system, even if there
-# is no complete old system. it has to install commands, for which
-# it has to install libraries, for which it has to install includes,
-# for which it has to install /etc (for users and ownerships).
-# etcfiles also creates a directory hierarchy in its
-# 'make install' target.
-# 
-# etcfiles has to be done first.
-world: includes depend libraries cmds install postinstall
+TTYMODULE=minix/drivers/tty
+TTYSAVEAS=drivers/tty
 
-includes:
-	cd include && $(MAKE) install gcc
+MEMMODULE=minix/drivers/memory
+MEMSAVEAS=drivers/memory
 
-libraries:
-	cd lib && $(GMAKE) all
-	cd lib && $(GMAKE) install
+LDRVMODULE=minix/drivers/libdriver
+LDRVSAVEAS=drivers/libdriver
 
-cmds:
-	if [ -f commands/Makefile ] ; then cd commands && $(MAKE) all; fi
+LOGMODULE=minix/drivers/log
+LOGSAVEAS=drivers/log
 
-install::
-	if [ -f commands/Makefile ] ; then cd commands && $(MAKE) install; fi
+SERVERSMODULE=minix/servers
+SERVERSSAVEAS=servers
 
-depend::
-	mkdep kernel
-	mkdep servers
-	mkdep drivers
-	cd kernel && $(MAKE) $@
-	cd servers && $(MAKE) $@
-	cd drivers && $(MAKE) $@
+VBDMODULE=minix/drivers/xenvbd
+VBDSAVEAS=drivers/xenvbd
+
+MINIXIP=192.168.0.2
+MINIXUSER=root
+FYPHOST=192.168.1.13
+SRCDIR=/usr/src
+BUILDDIR=/usr/src/tools
+KERNELIMAGE=$(BUILDDIR)/image
+TMPIMAGE=/tmp/minix
+FYPKERNELIMAGE=/etc/xen/minix
+
+all: deploy
+
+update: 
+	@ echo; echo "*** Updating sources from CVS ***"; echo
+	rsh -l $(MINIXUSER) $(MINIXIP) "cd $(SRCDIR) && cvs -d $(CVSROOT) login && cvs -d $(CVSROOT) co -d $(KERNELSAVEAS) $(KERNELMODULE);"
 
 
-clean::
-	cd lib && $(GMAKE) $@
-	test ! -f commands/Makefile || { cd commands && $(MAKE) $@; }
+build: update
+	@ echo; echo "*** Building kernel image ***"; echo
+	rsh -l $(MINIXUSER) $(MINIXIP) "cd $(BUILDDIR) && make image";
 
-etcfiles::
-	cd etc && $(MAKE) install
+updateheaders: 
+	@ echo; echo "*** Updating headers from CVS ***"; echo
+	rsh -l $(MINIXUSER) $(MINIXIP) "cd $(SRCDIR) && cvs -d $(CVSROOT) login && cvs -d $(CVSROOT) co -d $(HEADERSAVEAS) $(HEADERMODULE);"
 
-clean::
-	cd test && $(MAKE) $@
+installheaders: updateheaders
+	@ echo; echo "*** Installing headers ***"; echo
+	rsh -l $(MINIXUSER) $(MINIXIP) "cd $(SRCDIR)/$(HEADERSAVEAS) && make install";
 
-all install clean::
-	cd boot && $(MAKE) $@
-	cd man && $(MAKE) $@	# First manpages, then commands
-	test ! -f commands/Makefile || { cd commands && $(MAKE) $@; }
-	cd tools && $(MAKE) $@
-	cd servers && $(MAKE) $@
 
-postinstall:
-	cd etc && $(MAKE) $@
+updatetty: 
+	@ echo; echo "*** Updating tty driver from CVS ***"; echo
+	rsh -l $(MINIXUSER) $(MINIXIP) "cd $(SRCDIR) && cvs -d $(CVSROOT) login && cvs -d $(CVSROOT) co -d $(TTYSAVEAS) $(TTYMODULE);"
+
+updatemem: 
+	@ echo; echo "*** Updating mem driver from CVS ***"; echo
+	rsh -l $(MINIXUSER) $(MINIXIP) "cd $(SRCDIR) && cvs -d $(CVSROOT) login && cvs -d $(CVSROOT) co -d $(MEMSAVEAS) $(MEMMODULE);"
+
+updateldrv: 
+	@ echo; echo "*** Updating mem driver from CVS ***"; echo
+	rsh -l $(MINIXUSER) $(MINIXIP) "cd $(SRCDIR) && cvs -d $(CVSROOT) login && cvs -d $(CVSROOT) co -d $(LDRVSAVEAS) $(LDRVMODULE);"
+
+updatelog: 
+	@ echo; echo "*** Updating mem driver from CVS ***"; echo
+	rsh -l $(MINIXUSER) $(MINIXIP) "cd $(SRCDIR) && cvs -d $(CVSROOT) login && cvs -d $(CVSROOT) co -d $(LOGSAVEAS) $(LOGMODULE);"
+
+updateservers: 
+	@ echo; echo "*** Updating servers driver from CVS ***"; echo
+	rsh -l $(MINIXUSER) $(MINIXIP) "cd $(SRCDIR) && cvs -d $(CVSROOT) login && cvs -d $(CVSROOT) co -d $(SERVERSSAVEAS) $(SERVERSMODULE);"
+
+buildis: updateservers
+	@ echo; echo "*** Building is server ***"; echo
+	rsh -l $(MINIXUSER) $(MINIXIP) "cd $(SRCDIR)/servers/is && make";
+
+updatevbd: 
+	@ echo; echo "*** Updating vbd driver from CVS ***"; echo
+	rsh -l $(MINIXUSER) $(MINIXIP) "cd $(SRCDIR) && cvs -d $(CVSROOT) login && cvs -d $(CVSROOT) co -d $(VBDSAVEAS) $(VBDMODULE);"
+
+buildvbd: updatevbd
+	@ echo; echo "*** Building VBD driver ***"; echo
+	rsh -l $(MINIXUSER) $(MINIXIP) "cd $(SRCDIR)/drivers/xenvbd && make";
+
+
+buildtty: updatetty
+	@ echo; echo "*** Building tty driver ***"; echo
+	rsh -l $(MINIXUSER) $(MINIXIP) "cd $(SRCDIR)/$(TTYSAVEAS) && make";
+
+cleantty: 
+	@ echo; echo "*** Cleaning tty driver ***"; echo
+	rsh -l $(MINIXUSER) $(MINIXIP) "cd $(SRCDIR)/$(TTYSAVEAS) && make clean";
+
+kernelclean: 
+	@ echo; echo "*** Cleaning kernel sources ***"; echo
+	rsh -l $(MINIXUSER) $(MINIXIP) "cd $(SRCDIR)/$(KERNELSAVEAS) && make clean";
+
+tags:
+	find . -name '*.[sch]' | xargs etags --members --typedefs --defines --globals
+
+deploy: build
+	@echo "Copying image from minix host"
+	rcp root@$(MINIXIP):$(KERNELIMAGE) $(TMPIMAGE);
+	@echo "Copying image to fyp host"
+	scp $(TMPIMAGE) root@$(FYPHOST):$(FYPKERNELIMAGE);
+
+indentivan:
+	find . -name '*.[c]' | xargs indent -kr -l100 -i8
+
+indentast:
+	find . -name '*.[c]' | xargs indent -kr -l100 -i2

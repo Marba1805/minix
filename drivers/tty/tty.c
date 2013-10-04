@@ -74,7 +74,7 @@
 #include <sys/time.h>
 #include <sys/select.h>
 
-extern int irq_hook_id;
+/*extern int irq_hook_id;*/
 
 unsigned long kbd_irq_set = 0;
 unsigned long rs_irq_set = 0;
@@ -84,7 +84,7 @@ unsigned long rs_irq_set = 0;
 
 /* Macros for magic tty types. */
 #define isconsole(tp)	((tp) < tty_addr(NR_CONS))
-#define ispty(tp)	((tp) >= tty_addr(NR_CONS+NR_RS_LINES))
+#define ispty(tp)	((tp) >= tty_addr(NR_CONS+NR_XEN_CONS+NR_RS_LINES))
 
 /* Macros for magic tty structure pointers. */
 #define FIRST_TTY	tty_addr(0)
@@ -94,6 +94,12 @@ unsigned long rs_irq_set = 0;
 #define tty_active(tp)	((tp)->tty_devread != NULL)
 
 /* RS232 lines or pseudo terminals can be completely configured out. */
+#if NR_CONS == 0
+#define scr_init(tp)    ((void) 0)
+#endif
+#if NR_XEN_CONS == 0
+#define xencons_init(tp) ((void) 0)
+#endif
 #if NR_RS_LINES == 0
 #define rs_init(tp)	((void) 0)
 #endif
@@ -148,49 +154,53 @@ PRIVATE struct termios termios_defaults = {
 PRIVATE struct winsize winsize_defaults;	/* = all zeroes */
 
 /* Global variables for the TTY task (declared extern in tty.h). */
-PUBLIC tty_t tty_table[NR_CONS+NR_RS_LINES+NR_PTYS];
-PUBLIC int ccurrent;			/* currently active console */
-PUBLIC timer_t *tty_timers;		/* queue of TTY timers */
+PUBLIC tty_t tty_table[NR_CONS + NR_XEN_CONS + NR_RS_LINES + NR_PTYS];
+PUBLIC int ccurrent;		/* currently active console */
+PUBLIC timer_t *tty_timers;	/* queue of TTY timers */
 PUBLIC clock_t tty_next_timeout;	/* time that the next alarm is due */
 PUBLIC struct machine machine;		/* kernel environment variables */
+
 
 /*===========================================================================*
  *				tty_task				     *
  *===========================================================================*/
 PUBLIC void main(void)
 {
-/* Main routine of the terminal task. */
-
-  message tty_mess;		/* buffer for all incoming messages */
+  /* Main routine of the terminal task. */
+  message tty_mess;	/* buffer for all incoming messages */
   unsigned line;
-  int r, s;
+  int r, s, i;
   register struct proc *rp;
   register tty_t *tp;
+
 
   /* Initialize the TTY driver. */
   tty_init();
 
-  /* Get kernel environment (protected_mode, pc_at and ega are needed). */ 
-  if (OK != (s=sys_getmachine(&machine))) {
-    panic("TTY","Couldn't obtain kernel environment.", s);
+  s = sys_getmachine(&machine);
+  /* Get kernel environment (protected_mode, pc_at and ega are needed). */
+  if (OK != (s = sys_getmachine(&machine))) {
+    panic("TTY", "Couldn't obtain kernel environment.", s);
   }
-
+#if NR_CONS > 0
   /* Final one-time keyboard initialization. */
   kb_init_once();
+#endif
 
   printf("\n");
 
   while (TRUE) {
+    /* Check for and handle any events on any of the ttys. */
+    for (tp = FIRST_TTY; tp < END_TTY; tp++) {
+      if (tp->tty_events)
+	handle_events(tp);
+    }
 
-	/* Check for and handle any events on any of the ttys. */
-	for (tp = FIRST_TTY; tp < END_TTY; tp++) {
-		if (tp->tty_events) handle_events(tp);
-	}
+    /* Get a request message. */
+    r = receive(ANY, &tty_mess);
 
-	/* Get a request message. */
-	r= receive(ANY, &tty_mess);
-	if (r != 0)
-		panic("TTY", "receive failed with %d", r);
+    if (r != 0)
+      panic("TTY", "receive failed with %d", r);
 
 	/* First handle all kernel notification types that the TTY supports. 
 	 *  - An alarm went off, expire all timers and handle the events. 
@@ -206,47 +216,76 @@ PUBLIC void main(void)
 		expire_timers();	/* run watchdogs of expired timers */
 		continue;		/* contine to check for events */
 	case DEV_PING:
-		notify(tty_mess.m_source);
+	        notify(tty_mess.m_source);
 		continue;
-	case HARD_INT: {		/* hardware interrupt notification */
-		if (tty_mess.NOTIFY_ARG & kbd_irq_set)
-			kbd_interrupt(&tty_mess);/* fetch chars from keyboard */
+	case HARD_INT:{/* hardware interrupt notification */
+#if NR_CONS > 0
+#error shouldnt be compiling cons in
+	        if (tty_mess.NOTIFY_ARG & kbd_irq_set)
+		  kbd_interrupt(&tty_mess);	/* fetch chars from keyboard */
+#endif
 #if NR_RS_LINES > 0
+#error shoudlnt be compiling rs in
 		if (tty_mess.NOTIFY_ARG & rs_irq_set)
-			rs_interrupt(&tty_mess);/* serial I/O */
+		  rs_interrupt(&tty_mess);	/* serial I/O */
+#endif
+#if NR_XEN_CONS > 0
+/*			if (tty_mess.m_source == CTRLIF)*/
+		xencons_interrupt(&tty_mess);	/* xen I/O */
 #endif
 		expire_timers();	/* run watchdogs of expired timers */
-		continue;		/* contine to check for events */
+		continue;               /* contine to check for events */
 	}
-	case SYS_SIG: {			/* system signal */
-		sigset_t sigset = (sigset_t) tty_mess.NOTIFY_ARG;
-
+	case SYS_SIG:{	/* system signal */
+                sigset_t sigset =
+		  (sigset_t) tty_mess.NOTIFY_ARG;
+#if NR_CONS > 0
 		if (sigismember(&sigset, SIGKSTOP)) {
-			cons_stop();		/* switch to primary console */
-			if (irq_hook_id != -1) {
-				sys_irqdisable(&irq_hook_id);
-				sys_irqrmpolicy(KEYBOARD_IRQ, &irq_hook_id);
-			}
-		} 
-		if (sigismember(&sigset, SIGTERM)) cons_stop();	
-		if (sigismember(&sigset, SIGKMESS)) do_new_kmess(&tty_mess);
+		  cons_stop();	/* switch to primary console */
+		  if (irq_hook_id != -1) {
+		    sys_irqdisable
+		      (&irq_hook_id);
+		    sys_irqrmpolicy
+		      (KEYBOARD_IRQ,
+		       &irq_hook_id);
+		  }
+		}
+		if (sigismember(&sigset, SIGTERM))
+		  cons_stop();
+#endif
+		if (sigismember(&sigset, SIGKMESS)) {
+#if NR_CONS > 0
+		  do_new_kmess(&tty_mess);
+#elif NR_XEN_CONS > 0
+		  do_xen_kmess(&tty_mess);
+#endif
+		}
 		continue;
 	}
-	case PANIC_DUMPS:		/* allow panic dumps */
-		cons_stop();		/* switch to primary console */
-		do_panic_dumps(&tty_mess);	
-		continue;
-	case DIAGNOSTICS: 		/* a server wants to print some */
-		do_diagnostics(&tty_mess);
-		continue;
+#if NR_CONS > 0
+	case PANIC_DUMPS:	/* allow panic dumps */
+
+	  cons_stop();	/* switch to primary console */
+	  do_panic_dumps(&tty_mess);
+	  continue;
+#endif
+	case DIAGNOSTICS:	/* a server wants to print some */
+#if NR_CONS > 0
+	  do_diagnostics(&tty_mess);
+#elif NR_XEN_CONS > 0
+	  do_xen_diagnostics(&tty_mess);
+#endif
+	  continue;
+
 	case GET_KMESS:
-		do_get_kmess(&tty_mess);
-		continue;
-	case FKEY_CONTROL:		/* (un)register a fkey observer */
-		do_fkey_ctl(&tty_mess);
-		continue;
-	default:			/* should be a driver request */
-		;			/* do nothing; end switch */
+	  do_get_kmess(&tty_mess);
+	  continue;
+	case FKEY_CONTROL:	/* (un)register a fkey observer */
+	  do_fkey_ctl(&tty_mess);
+	  continue;
+
+	default:	/* should be a driver request */
+	  ;	/* do nothing; end switch */
 	}
 
 	/* Only device requests should get to this point. All requests, 
@@ -254,8 +293,8 @@ PUBLIC void main(void)
 	 * exception and get the minor device number otherwise.
 	 */
 	if (tty_mess.m_type == DEV_STATUS) {
-		do_status(&tty_mess);
-		continue;
+	  do_status(&tty_mess);
+	  continue;
 	}
 	line = tty_mess.TTY_LINE;
 	if ((line - CONS_MINOR) < NR_CONS) {
@@ -263,15 +302,17 @@ PUBLIC void main(void)
 	} else if (line == LOG_MINOR) {
 		tp = tty_addr(0);
 	} else if ((line - RS232_MINOR) < NR_RS_LINES) {
-		tp = tty_addr(line - RS232_MINOR + NR_CONS);
+	  tp = tty_addr(line - RS232_MINOR + NR_CONS);
 	} else if ((line - TTYPX_MINOR) < NR_PTYS) {
-		tp = tty_addr(line - TTYPX_MINOR + NR_CONS + NR_RS_LINES);
+	  tp = tty_addr(line - TTYPX_MINOR + NR_CONS +
+			NR_XEN_CONS + NR_RS_LINES);
 	} else if ((line - PTYPX_MINOR) < NR_PTYS) {
-		tp = tty_addr(line - PTYPX_MINOR + NR_CONS + NR_RS_LINES);
-		if (tty_mess.m_type != DEV_IOCTL) {
-			do_pty(tp, &tty_mess);
-			continue;
-		}
+	  tp = tty_addr(line - PTYPX_MINOR + NR_CONS +
+			NR_XEN_CONS + NR_RS_LINES);
+	  if (tty_mess.m_type != DEV_IOCTL) {
+	    do_pty(tp, &tty_mess);
+	    continue;
+	  }
 	} else {
 		tp = NULL;
 	}
@@ -304,6 +345,140 @@ PUBLIC void main(void)
 						tty_mess.PROC_NR, EINVAL);
 	}
   }
+}
+
+/*===========================================================================*
+ *				do_get_kmess				     *
+ *===========================================================================*/
+PUBLIC void do_get_kmess(m_ptr)
+     message *m_ptr;			/* pointer to request message */
+{
+  /* Provide the log device with debug output */
+  vir_bytes dst;
+  int r;
+
+  dst = (vir_bytes) m_ptr->GETKM_PTR;
+  r = OK;
+  if (sys_vircopy(SELF, D, (vir_bytes) & kmess, m_ptr->m_source, D,
+		  dst, sizeof(kmess)) != OK) {
+    r = EFAULT;
+  }
+  m_ptr->m_type = r;
+  send(m_ptr->m_source, m_ptr);
+}
+
+/*===========================================================================*
+ *				do_fkey_ctl				     *
+ *===========================================================================*/
+PUBLIC void do_fkey_ctl(m_ptr)
+     message *m_ptr;			/* pointer to the request message */
+{
+  /* This procedure allows processes to register a function key to receive
+   * notifications if it is pressed. At most one binding per key can exist.
+   */
+  int i;
+  int result;
+
+  switch (m_ptr->FKEY_REQUEST) {	/* see what we must do */
+  case FKEY_MAP:		/* request for new mapping */
+    result = OK;	/* assume everything will be ok */
+    for (i = 0; i < 12; i++) {	/* check F1-F12 keys */
+      if (bit_isset(m_ptr->FKEY_FKEYS, i + 1)) {
+#if DEAD_CODE
+	/* Currently, we don't check if the slot is in use, so that IS
+	 * can recover after a crash by overtaking its existing mappings.
+	 * In future, a better solution will be implemented.
+	 */
+	if (fkey_obs[i].proc_nr == NONE) {
+#endif
+	  fkey_obs[i].proc_nr =
+	    m_ptr->m_source;
+	  fkey_obs[i].events = 0;
+	  bit_unset(m_ptr->FKEY_FKEYS,
+		    i + 1);
+#if DEAD_CODE
+	} else {
+	  printf
+	    ("WARNING, fkey_map failed F%d\n",
+	     i + 1);
+	  result = EBUSY;	/* report failure, but try rest */
+	}
+#endif
+      }
+    }
+    for (i = 0; i < 12; i++) {	/* check Shift+F1-F12 keys */
+      if (bit_isset(m_ptr->FKEY_SFKEYS, i + 1)) {
+#if DEAD_CODE
+	if (sfkey_obs[i].proc_nr == NONE) {
+#endif
+	  sfkey_obs[i].proc_nr =
+	    m_ptr->m_source;
+	  sfkey_obs[i].events = 0;
+	  bit_unset(m_ptr->FKEY_SFKEYS,
+		    i + 1);
+#if DEAD_CODE
+	} else {
+	  printf
+	    ("WARNING, fkey_map failed Shift F%d\n",
+	     i + 1);
+	  result = EBUSY;	/* report failure but try rest */
+	}
+#endif
+      }
+    }
+    break;
+  case FKEY_UNMAP:
+    result = OK;	/* assume everything will be ok */
+    for (i = 0; i < 12; i++) {	/* check F1-F12 keys */
+      if (bit_isset(m_ptr->FKEY_FKEYS, i + 1)) {
+	if (fkey_obs[i].proc_nr == m_ptr->m_source) {
+	  fkey_obs[i].proc_nr = NONE;
+	  fkey_obs[i].events = 0;
+	  bit_unset(m_ptr->FKEY_FKEYS,
+		    i + 1);
+	} else {
+	  result = EPERM;	/* report failure, but try rest */
+	}
+      }
+    }
+    for (i = 0; i < 12; i++) {	/* check Shift+F1-F12 keys */
+      if (bit_isset(m_ptr->FKEY_SFKEYS, i + 1)) {
+	if (sfkey_obs[i].proc_nr ==
+	    m_ptr->m_source) {
+	  sfkey_obs[i].proc_nr = NONE;
+	  sfkey_obs[i].events = 0;
+	  bit_unset(m_ptr->FKEY_SFKEYS,
+		    i + 1);
+	} else {
+	  result = EPERM;	/* report failure, but try rest */
+	}
+      }
+    }
+    break;
+  case FKEY_EVENTS:
+    m_ptr->FKEY_FKEYS = m_ptr->FKEY_SFKEYS = 0;
+    for (i = 0; i < 12; i++) {	/* check (Shift+) F1-F12 keys */
+      if (fkey_obs[i].proc_nr == m_ptr->m_source) {
+	if (fkey_obs[i].events) {
+	  bit_set(m_ptr->FKEY_FKEYS, i + 1);
+	  fkey_obs[i].events = 0;
+	}
+      }
+      if (sfkey_obs[i].proc_nr == m_ptr->m_source) {
+	if (sfkey_obs[i].events) {
+	  bit_set(m_ptr->FKEY_SFKEYS, i + 1);
+	  sfkey_obs[i].events = 0;
+	}
+      }
+    }
+    break;
+  default:
+    result = EINVAL;	/* key cannot be observed */
+  }
+
+  /* Almost done, return result to caller. */
+  m_ptr->m_type = result;
+  send(m_ptr->m_source, m_ptr);
 }
 
 /*===========================================================================*
@@ -684,14 +859,14 @@ message *m_ptr;			/* pointer to message sent to task */
 
 #if (MACHINE == IBM_PC)
     case KIOCSMAP:
-	/* Load a new keymap (only /dev/console). */
-	if (isconsole(tp)) r = kbd_loadmap(m_ptr);
-	break;
+        /* Load a new keymap (only /dev/console). */
+        /*	if (isconsole(tp)) r = kbd_loadmap(m_ptr);*/
+        break;
 
     case TIOCSFON:
-	/* Load a font into an EGA or VGA card (hs@hck.hr) */
-	if (isconsole(tp)) r = con_loadfont(m_ptr);
-	break;
+        /* Load a font into an EGA or VGA card (hs@hck.hr) */
+        /*	if (isconsole(tp)) r = con_loadfont(m_ptr);*/
+        break;
 #endif
 
 #if (MACHINE == ATARI)
@@ -1505,7 +1680,7 @@ PRIVATE void tty_init()
 /* Initialize tty structure and call device initialization routines. */
 
   register tty_t *tp;
-  int s;
+  int s, i;
   struct sigaction sa;
 
   /* Initialize the terminal lines. */
@@ -1515,22 +1690,36 @@ PRIVATE void tty_init()
 
   	tmr_inittimer(&tp->tty_tmr);
 
-  	tp->tty_intail = tp->tty_inhead = tp->tty_inbuf;
-  	tp->tty_min = 1;
-  	tp->tty_termios = termios_defaults;
-  	tp->tty_icancel = tp->tty_ocancel = tp->tty_ioctl = tp->tty_close =
-								tty_devnop;
-  	if (tp < tty_addr(NR_CONS)) {
-		scr_init(tp);
-  		tp->tty_minor = CONS_MINOR + s;
-  	} else
-  	if (tp < tty_addr(NR_CONS+NR_RS_LINES)) {
-		rs_init(tp);
-  		tp->tty_minor = RS232_MINOR + s-NR_CONS;
-  	} else {
-		pty_init(tp);
-		tp->tty_minor = s - (NR_CONS+NR_RS_LINES) + TTYPX_MINOR;
-  	}
+	tp->tty_intail = tp->tty_inhead = tp->tty_inbuf;
+	tp->tty_min = 1;
+	tp->tty_termios = termios_defaults;
+	tp->tty_icancel = tp->tty_ocancel = tp->tty_ioctl =
+	  tp->tty_close = tty_devnop;
+	if (tp < tty_addr(NR_CONS)) {
+	  scr_init(tp);
+	  tp->tty_minor = CONS_MINOR + s;
+	} else if (tp < tty_addr(NR_CONS + NR_XEN_CONS)) {
+	  xencons_init(tp);
+	  tp->tty_minor = XEN_MINOR + s - NR_CONS;
+	} else if (tp <
+		   tty_addr(NR_CONS + NR_XEN_CONS + NR_RS_LINES)) {
+	  rs_init(tp);
+	  tp->tty_minor =
+	    RS232_MINOR + s - (NR_CONS + NR_XEN_CONS);
+	} else {
+	  pty_init(tp);
+	  tp->tty_minor =
+	    s - (NR_CONS + NR_XEN_CONS + NR_RS_LINES) +
+	    TTYPX_MINOR;
+	}
+  }
+
+  /* Clear the function key observers array. Also see func_key(). */
+  for (i = 0; i < 12; i++) {
+    fkey_obs[i].proc_nr = NONE;	/* F1-F12 observers */
+    fkey_obs[i].events = 0;	/* F1-F12 observers */
+    sfkey_obs[i].proc_nr = NONE;	/* Shift F1-F12 observers */
+    sfkey_obs[i].events = 0;	/* Shift F1-F12 observers */
   }
 
 #if DEAD_CODE

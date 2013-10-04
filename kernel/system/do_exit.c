@@ -122,7 +122,7 @@ register struct proc *rc;		/* slot of process to clean up */
   /* Check the table with IRQ hooks to see if hooks should be released. */
   for (i=0; i < NR_IRQ_HOOKS; i++) {
       if (irq_hooks[i].proc_nr == proc_nr(rc)) {
-          rm_irq_handler(&irq_hooks[i]);	/* remove interrupt handler */
+	/*rm_irq_handler(&irq_hooks[i]);	/* remove interrupt handler */
           irq_hooks[i].proc_nr = NONE; 		/* mark hook as free */
       }
   }

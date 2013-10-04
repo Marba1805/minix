@@ -94,13 +94,14 @@
  * The kernel does this for its own kprintf() in kernel/utility.c, also using
  * this array, but a slightly different mechanism.
  */
-#define OUTPUT_PROCS_ARRAY	{ TTY_PROC_NR, LOG_PROC_NR, NONE }
+#define OUTPUT_PROCS_ARRAY	{ TTY_PROC_NR, NONE }
 
 /* NR_CONS, NR_RS_LINES, and NR_PTYS determine the number of terminals the
  * system can handle.
  */
-#define NR_CONS            4	/* # system consoles (1 to 8) */
-#define	NR_RS_LINES	   4	/* # rs232 terminals (0 to 4) */
+#define NR_CONS            0	/* # system consoles (1 to 8) */
+#define	NR_RS_LINES	   0	/* # rs232 terminals (0 to 4) */
+#define NR_XEN_CONS        1
 #define	NR_PTYS		   32	/* # pseudo terminals (0 to 64) */
 
 /*===========================================================================*
@@ -114,6 +115,7 @@
 #define M68000            _CHIP_M68000	/* CHIP type for Atari, Amiga, Macintosh    */
 #define SPARC             _CHIP_SPARC	/* CHIP type for SUN-4 (e.g. SPARCstation)  */
 
+#define XEN 1
 /* Set the FP_FORMAT type based on the machine selected, either hw or sw    */
 #define FP_NONE	 _FP_NONE	/* no floating point support                */
 #define FP_IEEE	 _FP_IEEE	/* conform IEEE floating point standard     */

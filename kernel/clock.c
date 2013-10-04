@@ -6,6 +6,7 @@
  * CLOCK task thus is hidden from the outside world.  
  *
  * Changes:
+ *   Apr 05, 2006   Modifed to work with xen hypervisor (I. Kelly)
  *   Oct 08, 2005   reordering and comment editing (A. S. Woodhull)
  *   Mar 18, 2004   clock interface moved to SYSTEM task (Jorrit N. Herder) 
  *   Sep 30, 2004   source code documentation updated  (Jorrit N. Herder)
@@ -33,10 +34,12 @@
 #include "proc.h"
 #include <signal.h>
 #include <minix/com.h>
+#include <xen/xen.h>
 
 /* Function prototype for PRIVATE functions. */ 
 FORWARD _PROTOTYPE( void init_clock, (void) );
-FORWARD _PROTOTYPE( int clock_handler, (irq_hook_t *hook) );
+FORWARD _PROTOTYPE(void clock_handler,
+		   (unsigned int, struct stackframe_s *));
 FORWARD _PROTOTYPE( int do_clocktick, (message *m_ptr) );
 
 /* Clock parameters. */
@@ -72,6 +75,7 @@ PUBLIC void clock_task()
  */
   message m;			/* message buffer for both input and output */
   int result;			/* result returned by the handler */
+  int i = 0;
 
   init_clock();			/* initialize clock task */
 
@@ -129,15 +133,11 @@ message *m_ptr;				/* pointer to request message */
  *===========================================================================*/
 PRIVATE void init_clock()
 {
-  /* Initialize the CLOCK's interrupt hook. */
-  clock_hook.proc_nr = CLOCK;
+  unsigned int irq;
 
-  /* Initialize channel 0 of the 8253A timer to, e.g., 60 Hz. */
-  outb(TIMER_MODE, SQUARE_WAVE);	/* set timer to run continuously */
-  outb(TIMER0, TIMER_COUNT);		/* load timer low byte */
-  outb(TIMER0, TIMER_COUNT >> 8);	/* load timer high byte */
-  put_irq_handler(&clock_hook, CLOCK_IRQ, clock_handler);/* register handler */
-  enable_irq(&clock_hook);		/* ready for clock interrupts */
+  irq = bind_virq_to_irq(VIRQ_TIMER);
+  add_irq_handler(irq, clock_handler);
+  enable_irq_handler(irq);
 }
 
 /*===========================================================================*
@@ -145,17 +145,17 @@ PRIVATE void init_clock()
  *===========================================================================*/
 PUBLIC void clock_stop()
 {
-/* Reset the clock to the BIOS rate. (For rebooting) */
-  outb(TIMER_MODE, 0x36);
-  outb(TIMER0, 0);
-  outb(TIMER0, 0);
+  int irq = get_irq_from_virq(VIRQ_TIMER);
+  disable_irq_handler(irq);
+  clear_irq_handler(irq);
 }
 
 /*===========================================================================*
  *				clock_handler				     *
  *===========================================================================*/
-PRIVATE int clock_handler(hook)
-irq_hook_t *hook;
+PRIVATE void clock_handler(ev, s)
+unsigned int ev;
+struct stackframe_s *s;
 {
 /* This executes on each clock tick (i.e., every time the timer chip generates 
  * an interrupt). It does a little bit of work so the clock task does not have 
@@ -182,7 +182,7 @@ irq_hook_t *hook;
  *		since at worst the previous process would be billed.
  */
   register unsigned ticks;
-
+  int i = 0;
   /* Acknowledge the PS/2 clock interrupt. */
   if (machine.ps_mca) outb(PORT_B, inb(PORT_B) | CLOCK_ACK_BIT);
 
@@ -209,10 +209,10 @@ irq_hook_t *hook;
    * Some processes, such as the kernel tasks, cannot be preempted. 
    */ 
   if ((next_timeout <= realtime) || (proc_ptr->p_ticks_left <= 0)) {
-      prev_ptr = proc_ptr;			/* store running process */
-      lock_notify(HARDWARE, CLOCK);		/* send notification */
-  } 
-  return(1);					/* reenable interrupts */
+    prev_ptr = proc_ptr;	/* store running process */
+    lock_notify(HARDWARE, CLOCK);	/* send notification */
+  }
+  return;			/* reenable interrupts */
 }
 
 /*===========================================================================*
@@ -254,16 +254,17 @@ struct timer *tp;		/* pointer to timer structure */
 	TMR_NEVER : clock_timers->tmr_exp_time;
 }
 
+#if 0
 /*===========================================================================*
  *				read_clock				     *
  *===========================================================================*/
-PUBLIC unsigned long read_clock()
+/*PUBLIC unsigned long read_clock()
 {
 /* Read the counter of channel 0 of the 8253A timer.  This counter counts
  * down at a rate of TIMER_FREQ and restarts at TIMER_COUNT-1 when it
  * reaches zero. A hardware interrupt (clock tick) occurs when the counter
  * gets to zero and restarts its cycle.  
- */
+ *
   unsigned count;
 
   outb(TIMER_MODE, LATCH_COUNT);
@@ -272,3 +273,5 @@ PUBLIC unsigned long read_clock()
   
   return count;
 }
+*/
+#endif

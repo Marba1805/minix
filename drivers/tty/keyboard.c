@@ -22,6 +22,8 @@
 #include "../../kernel/type.h"
 #include "../../kernel/proc.h"
 
+#if NR_CONS > 0
+
 int irq_hook_id = -1;
 
 /* Standard and AT keyboard.  (PS/2 MCA implies AT throughout.) */
@@ -76,10 +78,6 @@ PRIVATE int locks[NR_CONS];	/* per console lock keys state */
 PRIVATE char numpad_map[] =
 		{'H', 'Y', 'A', 'B', 'D', 'C', 'V', 'U', 'G', 'S', 'T', '@'};
 
-/* Variables and definition for observed function keys. */
-typedef struct observer { int proc_nr; int events; } obs_t;
-PRIVATE obs_t  fkey_obs[12];	/* observers for F1-F12 */
-PRIVATE obs_t sfkey_obs[12];	/* observers for SHIFT F1-F12 */
 
 FORWARD _PROTOTYPE( int kb_ack, (void) 					);
 FORWARD _PROTOTYPE( int kb_wait, (void)				 	);
@@ -348,6 +346,54 @@ PRIVATE int kb_wait()
 }
 
 /*===========================================================================*
+ *				func_key				     *
+ *===========================================================================*/
+PUBLIC int func_key(scode)
+     int scode;			/* scan code for a function key */
+{
+  /* This procedure traps function keys for debugging purposes. Observers of 
+   * function keys are kept in a global array. If a subject (a key) is pressed
+   * the observer is notified of the event. Initialization of the arrays is done
+   * in kb_init, where NONE is set to indicate there is no interest in the key.
+   * Returns FALSE on a key release or if the key is not observable.
+   */
+  message m;
+  int key;
+  int proc_nr;
+  int i, s;
+
+  /* Ignore key releases. If this is a key press, get full key code. */
+  if (scode & KEY_RELEASE)
+    return (FALSE);	/* key release */
+  key = map_key(scode);	/* include modifiers */
+
+  /* Key pressed, now see if there is an observer for the pressed key.
+   *           F1-F12   observers are in fkey_obs array. 
+   *    SHIFT  F1-F12   observers are in sfkey_req array. 
+   *    CTRL   F1-F12   reserved (see kb_read)
+   *    ALT    F1-F12   reserved (see kb_read)
+   * Other combinations are not in use. Note that Alt+Shift+F1-F12 is yet
+   * defined in <minix/keymap.h>, and thus is easy for future extensions.
+   */
+  if (F1 <= key && key <= F12) {	/* F1-F12 */
+    proc_nr = fkey_obs[key - F1].proc_nr;
+    fkey_obs[key - F1].events++;
+  } else if (SF1 <= key && key <= SF12) {	/* Shift F2-F12 */
+    proc_nr = sfkey_obs[key - SF1].proc_nr;
+    sfkey_obs[key - SF1].events++;
+  } else {
+    return (FALSE);	/* not observable */
+  }
+
+  /* See if an observer is registered and send it a message. */
+  if (proc_nr != NONE) {
+    m.NOTIFY_TYPE = FKEY_PRESSED;
+    notify(proc_nr);
+  }
+  return (TRUE);
+}
+
+/*===========================================================================*
  *				kb_ack					     *
  *===========================================================================*/
 PRIVATE int kb_ack()
@@ -388,13 +434,6 @@ PUBLIC void kb_init_once(void)
   set_leds();			/* turn off numlock led */
   scan_keyboard();		/* discard leftover keystroke */
 
-      /* Clear the function key observers array. Also see func_key(). */
-      for (i=0; i<12; i++) {
-          fkey_obs[i].proc_nr = NONE;	/* F1-F12 observers */
-          fkey_obs[i].events = 0;	/* F1-F12 observers */
-          sfkey_obs[i].proc_nr = NONE;	/* Shift F1-F12 observers */
-          sfkey_obs[i].events = 0;	/* Shift F1-F12 observers */
-      }
 
       /* Set interrupt handler and enable keyboard IRQ. */
       irq_hook_id = KEYBOARD_IRQ;	/* id to be returned on interrupt */
@@ -419,156 +458,6 @@ message *m;
   return(result);
 }
 
-/*===========================================================================*
- *				do_fkey_ctl				     *
- *===========================================================================*/
-PUBLIC void do_fkey_ctl(m_ptr)
-message *m_ptr;			/* pointer to the request message */
-{
-/* This procedure allows processes to register a function key to receive
- * notifications if it is pressed. At most one binding per key can exist.
- */
-  int i; 
-  int result;
-
-  switch (m_ptr->FKEY_REQUEST) {	/* see what we must do */
-  case FKEY_MAP:			/* request for new mapping */
-      result = OK;			/* assume everything will be ok*/
-      for (i=0; i < 12; i++) {		/* check F1-F12 keys */
-          if (bit_isset(m_ptr->FKEY_FKEYS, i+1) ) {
-#if DEAD_CODE
-	/* Currently, we don't check if the slot is in use, so that IS
-	 * can recover after a crash by overtaking its existing mappings.
-	 * In future, a better solution will be implemented.
-	 */
-              if (fkey_obs[i].proc_nr == NONE) { 
-#endif
-    	          fkey_obs[i].proc_nr = m_ptr->m_source;
-    	          fkey_obs[i].events = 0;
-    	          bit_unset(m_ptr->FKEY_FKEYS, i+1);
-#if DEAD_CODE
-    	      } else {
-    	          printf("WARNING, fkey_map failed F%d\n", i+1);
-    	          result = EBUSY;	/* report failure, but try rest */
-    	      }
-#endif
-    	  }
-      }
-      for (i=0; i < 12; i++) {		/* check Shift+F1-F12 keys */
-          if (bit_isset(m_ptr->FKEY_SFKEYS, i+1) ) {
-#if DEAD_CODE
-              if (sfkey_obs[i].proc_nr == NONE) { 
-#endif
-    	          sfkey_obs[i].proc_nr = m_ptr->m_source;
-    	          sfkey_obs[i].events = 0;
-    	          bit_unset(m_ptr->FKEY_SFKEYS, i+1);
-#if DEAD_CODE
-    	      } else {
-    	          printf("WARNING, fkey_map failed Shift F%d\n", i+1);
-    	          result = EBUSY;	/* report failure but try rest */
-    	      }
-#endif
-    	  }
-      }
-      break;
-  case FKEY_UNMAP:
-      result = OK;			/* assume everything will be ok*/
-      for (i=0; i < 12; i++) {		/* check F1-F12 keys */
-          if (bit_isset(m_ptr->FKEY_FKEYS, i+1) ) {
-              if (fkey_obs[i].proc_nr == m_ptr->m_source) { 
-    	          fkey_obs[i].proc_nr = NONE;
-    	          fkey_obs[i].events = 0;
-    	          bit_unset(m_ptr->FKEY_FKEYS, i+1);
-    	      } else {
-    	          result = EPERM;	/* report failure, but try rest */
-    	      }
-    	  }
-      }
-      for (i=0; i < 12; i++) {		/* check Shift+F1-F12 keys */
-          if (bit_isset(m_ptr->FKEY_SFKEYS, i+1) ) {
-              if (sfkey_obs[i].proc_nr == m_ptr->m_source) { 
-    	          sfkey_obs[i].proc_nr = NONE;
-    	          sfkey_obs[i].events = 0;
-    	          bit_unset(m_ptr->FKEY_SFKEYS, i+1);
-    	      } else {
-    	          result = EPERM;	/* report failure, but try rest */
-    	      }
-    	  }
-      }
-      break;
-  case FKEY_EVENTS:
-      m_ptr->FKEY_FKEYS = m_ptr->FKEY_SFKEYS = 0;
-      for (i=0; i < 12; i++) {		/* check (Shift+) F1-F12 keys */
-          if (fkey_obs[i].proc_nr == m_ptr->m_source) {
-              if (fkey_obs[i].events) { 
-                  bit_set(m_ptr->FKEY_FKEYS, i+1);
-                  fkey_obs[i].events = 0;
-              }
-          }
-          if (sfkey_obs[i].proc_nr == m_ptr->m_source) {
-              if (sfkey_obs[i].events) { 
-                  bit_set(m_ptr->FKEY_SFKEYS, i+1);
-                  sfkey_obs[i].events = 0;
-              }
-          }
-      }
-      break;
-  default:
-          result =  EINVAL;		/* key cannot be observed */
-  }
-
-  /* Almost done, return result to caller. */
-  m_ptr->m_type = result;
-  send(m_ptr->m_source, m_ptr);
-}
-
-/*===========================================================================*
- *				func_key				     *
- *===========================================================================*/
-PRIVATE int func_key(scode)
-int scode;			/* scan code for a function key */
-{
-/* This procedure traps function keys for debugging purposes. Observers of 
- * function keys are kept in a global array. If a subject (a key) is pressed
- * the observer is notified of the event. Initialization of the arrays is done
- * in kb_init, where NONE is set to indicate there is no interest in the key.
- * Returns FALSE on a key release or if the key is not observable.
- */
-  message m;
-  int key;
-  int proc_nr;
-  int i,s;
-
-  /* Ignore key releases. If this is a key press, get full key code. */
-  if (scode & KEY_RELEASE) return(FALSE);	/* key release */
-  key = map_key(scode);		 		/* include modifiers */
-
-  /* Key pressed, now see if there is an observer for the pressed key.
-   *	       F1-F12	observers are in fkey_obs array. 
-   *	SHIFT  F1-F12	observers are in sfkey_req array. 
-   *	CTRL   F1-F12	reserved (see kb_read)
-   *	ALT    F1-F12	reserved (see kb_read)
-   * Other combinations are not in use. Note that Alt+Shift+F1-F12 is yet
-   * defined in <minix/keymap.h>, and thus is easy for future extensions.
-   */
-  if (F1 <= key && key <= F12) {		/* F1-F12 */
-      proc_nr = fkey_obs[key - F1].proc_nr;	
-      fkey_obs[key - F1].events ++ ;	
-  } else if (SF1 <= key && key <= SF12) {	/* Shift F2-F12 */
-      proc_nr = sfkey_obs[key - SF1].proc_nr;	
-      sfkey_obs[key - SF1].events ++;	
-  }
-  else {
-      return(FALSE);				/* not observable */
-  }
-
-  /* See if an observer is registered and send it a message. */
-  if (proc_nr != NONE) { 
-      m.NOTIFY_TYPE = FKEY_PRESSED;
-      notify(proc_nr);
-  }
-  return(TRUE);
-}
 
 /*===========================================================================*
  *				show_key_mappings			     *
@@ -667,3 +556,4 @@ message *m;			/* request message to TTY */
   }
 }
 
+#endif				/* NR_CONS > 0 */

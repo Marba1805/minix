@@ -12,6 +12,7 @@
 #endif
 
 #include <minix/config.h>
+#include <xen/xen.h>
 #include "config.h"
 
 /* Variables relating to shutting down MINIX. */
@@ -46,13 +47,20 @@ EXTERN reg_t mon_ss, mon_sp;		/* boot monitor stack */
 EXTERN int mon_return;			/* true if we can return to monitor */
 EXTERN int do_serial_debug;
 
-/* Variables that are initialized elsewhere are just extern here. */
-extern struct boot_image image[]; 	/* system image processes */
-extern char *t_stack[];			/* task stack space */
-extern struct segdesc_s gdt[];		/* global descriptor table */
+EXTERN int ready_for_output;
 
-EXTERN _PROTOTYPE( void (*level0_func), (void) );
-#endif /* (CHIP == INTEL) */
+EXTERN minix_start_info_t *hypervisor_start_info;
+EXTERN shared_info_t *hypervisor_shared_info;
+
+/* Variables that are initialized elsewhere are just extern here. */
+extern struct boot_image image[];	/* system image processes */
+extern char *t_stack[];		/* task stack space */
+extern int callback_mutex;
+extern char k_callback;	/* hypercall_reentry count */
+
+EXTERN _PROTOTYPE(void (*level1_func), (void));
+
+#endif				/* (CHIP == INTEL) */
 
 #if (CHIP == M68000)
 /* M68000 specific variables go here. */

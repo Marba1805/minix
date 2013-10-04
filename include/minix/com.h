@@ -21,14 +21,15 @@
  */
 
 /* Kernel tasks. These all run in the same address space. */
-#define IDLE             -4	/* runs when no one else can run */
+#define IDLE             -5	/* runs when no one else can run */
+#define CTRLIF           -4	/* interdomain communication */
 #define CLOCK  		 -3	/* alarms and other clock functions */
 #define SYSTEM           -2	/* request system functionality */
 #define KERNEL           -1	/* pseudo-process for IPC and scheduling */
 #define HARDWARE     KERNEL	/* for hardware interrupt handlers */
 
 /* Number of tasks. Note that NR_PROCS is defined in <minix/config.h>. */
-#define NR_TASKS	  4 
+#define NR_TASKS	  5
 
 /* User-space processes, that is, device drivers, servers, and INIT. */
 #define PM_PROC_NR	  0	/* process manager */
@@ -38,11 +39,12 @@
 #define LOG_PROC_NR	  4	/* log device driver */
 #define TTY_PROC_NR	  5	/* terminal (TTY) driver */
 #define DRVR_PROC_NR      6	/* device driver for boot medium */
-#define DS_PROC_NR	  7    	/* data store server */
-#define INIT_PROC_NR	  8    	/* init -- goes multiuser */
+#define DS_PROC_NR	  7	/* data store server */
+#define INIT_PROC_NR	  8	/* init -- goes multiuser */
+#define IS_PROC_NR        9	/* information server */
 
 /* Number of processes contained in the system image. */
-#define NR_BOOT_PROCS 	(NR_TASKS + INIT_PROC_NR + 1)
+#define NR_BOOT_PROCS 	((NR_TASKS) + 6)	/* +2 for kernel and tty + INIT_PROC_NR + 1) */
 
 /*===========================================================================*
  *                	   Kernel notification types                         *
@@ -323,6 +325,7 @@
 #   define GET_MACHINE 	  12	/* get machine information */
 #   define GET_LOCKTIMING 13	/* get lock()/unlock() latency timing */
 #   define GET_BIOSBUFFER 14	/* get a buffer for BIOS calls */
+#   define GET_VTOM       15	/* convert a virtual address to a machine addr */
 #define I_PROC_NR      m7_i4	/* calling process */
 #define I_VAL_PTR      m7_p1	/* virtual address at caller */ 
 #define I_VAL_LEN      m7_i1	/* max length of value */

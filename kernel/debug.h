@@ -9,15 +9,6 @@
 
 #include "config.h"
 
-/* It's interesting to measure the time spent withing locked regions, because
- * this is the time that the system is deaf to interrupts.
- */
-#if DEBUG_TIME_LOCKS
-
-#define TIMING_POINTS		20	/* timing resolution */
-#define TIMING_CATEGORIES	20
-#define TIMING_NAME		10
-
 /* Enable prints such as
  *  . send/receive failed due to deadlock or dead source or dead destination
  *  . trap not allowed
@@ -27,7 +18,17 @@
  * Of course the call still fails, but nothing is printed if these warnings
  * are disabled.
  */
-#define DEBUG_ENABLE_IPC_WARNINGS	0
+#define DEBUG_ENABLE_IPC_WARNINGS	1
+
+/* It's interesting to measure the time spent withing locked regions, because
+ * this is the time that the system is deaf to interrupts.
+ */
+#if DEBUG_TIME_LOCKS
+
+#define TIMING_POINTS		20	/* timing resolution */
+#define TIMING_CATEGORIES	20
+#define TIMING_NAME		10
+
 
 /* Definition of the data structure to store lock() timing data. */ 
 struct lock_timingdata {
@@ -71,7 +72,7 @@ _PROTOTYPE( void check_runqueues, (char *when) );
  * and unlock() macros. That's done here. This redefine requires that this 
  * header is included after the other kernel headers.
  */
-#if (DEBUG_TIME_LOCKS || DEBUG_LOCK_CHECK)
+#if 0
 #  undef lock
 #  define lock(c, v)	do { lockcheck; \
 	intr_disable(); \

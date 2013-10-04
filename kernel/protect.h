@@ -4,7 +4,7 @@
 #define GDT_SIZE (FIRST_LDT_INDEX + NR_TASKS + NR_PROCS) 
 					/* spec. and LDT's */
 #define IDT_SIZE (IRQ8_VECTOR + 8)	/* only up to the highest vector */
-#define LDT_SIZE (2 + NR_REMOTE_SEGS) 	/* CS, DS and remote segments */
+#define GDT_ENTRIES_PER_PROC (2 + NR_REMOTE_SEGS)	/* CS, DS and remote segments */
 
 /* Fixed global descriptors.  1 to 7 are prescribed by the BIOS. */
 #define GDT_INDEX            1	/* GDT descriptor */
@@ -23,26 +23,21 @@
 #define D_INDEX             14	/* 64K memory segment at D0000 */
 #define FIRST_LDT_INDEX     15	/* rest of descriptors are LDT's */
 
-#define GDT_SELECTOR      0x08	/* (GDT_INDEX * DESC_SIZE) bad for asld */
-#define IDT_SELECTOR      0x10	/* (IDT_INDEX * DESC_SIZE) */
-#define DS_SELECTOR       0x18	/* (DS_INDEX * DESC_SIZE) */
-#define ES_SELECTOR       0x20	/* (ES_INDEX * DESC_SIZE) */
+#define GDT_SELECTOR      0x08	/* (GDT_INDEX * DESC_SIZE) bad for asld (Orig) */
+#define IDT_SELECTOR      0x10	/* (IDT_INDEX * DESC_SIZE) (Orig) */
+#define DS_SELECTOR       0x19	/* (DS_INDEX * DESC_SIZE) */
+#define ES_SELECTOR       0x20	/* (ES_INDEX * DESC_SIZE) (Orig) */
 #define FLAT_DS_SELECTOR  0x21	/* less privileged ES */
-#define SS_SELECTOR       0x28	/* (SS_INDEX * DESC_SIZE) */
-#define CS_SELECTOR       0x30	/* (CS_INDEX * DESC_SIZE) */
-#define MON_CS_SELECTOR   0x38	/* (MON_CS_INDEX * DESC_SIZE) */
-#define TSS_SELECTOR      0x40	/* (TSS_INDEX * DESC_SIZE) */
-#define DS_286_SELECTOR   0x49	/* (DS_286_INDEX*DESC_SIZE+TASK_PRIVILEGE) */
-#define ES_286_SELECTOR   0x51	/* (ES_286_INDEX*DESC_SIZE+TASK_PRIVILEGE) */
-
-/* Fixed local descriptors. */
-#define CS_LDT_INDEX         0	/* process CS */
-#define DS_LDT_INDEX         1	/* process DS=ES=FS=GS=SS */
-#define EXTRA_LDT_INDEX      2	/* first of the extra LDT entries */
+#define SS_SELECTOR       0x28	/* (SS_INDEX * DESC_SIZE) (Orig) */
+#define CS_SELECTOR       0x31	/* (CS_INDEX * DESC_SIZE) */
+#define MON_CS_SELECTOR   0x38	/* (MON_CS_INDEX * DESC_SIZE) (Orig) */
+#define TSS_SELECTOR      0x40	/* (TSS_INDEX * DESC_SIZE) (Orig) */
+#define DS_286_SELECTOR   0x49	/* (DS_286_INDEX*DESC_SIZE+TASK_PRIVILEGE) (Orig) */
+#define ES_286_SELECTOR   0x51	/* (ES_286_INDEX*DESC_SIZE+TASK_PRIVILEGE) (Orig) */
 
 /* Privileges. */
-#define INTR_PRIVILEGE       0	/* kernel and interrupt handlers */
-#define TASK_PRIVILEGE       1	/* kernel tasks */
+#define INTR_PRIVILEGE       1	/* kernel and interrupt handlers */
+#define TASK_PRIVILEGE       2	/* kernel tasks */
 #define USER_PRIVILEGE       3	/* servers and user processes */
 
 /* 286 hardware constants. */

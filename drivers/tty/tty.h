@@ -11,6 +11,7 @@
 #define CONS_MINOR	   0
 #define LOG_MINOR	  15
 #define RS232_MINOR	  16
+#define XEN_MINOR         17
 #define TTYPX_MINOR	 128
 #define PTYPX_MINOR	 192
 
@@ -94,7 +95,7 @@ typedef struct tty {
 } tty_t;
 
 /* Memory allocated in tty.c, so extern here. */
-extern tty_t tty_table[NR_CONS+NR_RS_LINES+NR_PTYS];
+extern tty_t tty_table[NR_CONS + NR_XEN_CONS + NR_RS_LINES + NR_PTYS];
 extern int ccurrent;		/* currently visible console */
 extern int irq_hook_id;		/* hook id for keyboard irq */
 
@@ -126,6 +127,14 @@ extern clock_t tty_next_timeout;	/* next TTY timeout */
 #define buflen(buf)	(sizeof(buf) / sizeof((buf)[0]))
 #define bufend(buf)	((buf) + buflen(buf))
 
+/* Variables and definition for observed function keys. */
+typedef struct observer {
+  int proc_nr;
+  int events;
+} obs_t;
+obs_t fkey_obs[12];		/* observers for F1-F12 */
+obs_t sfkey_obs[12];		/* observers for SHIFT F1-F12 */
+
 /* Memory allocated in tty.c, so extern here. */
 extern struct machine machine;	/* machine information (a.o.: pc_at, ega) */
 
@@ -151,9 +160,20 @@ _PROTOTYPE( int select_retry, (struct tty *tp)				);
 _PROTOTYPE( void rs_init, (struct tty *tp)				);
 _PROTOTYPE( void rs_interrupt, (message *m)				);
 
+/* xencons.c */
+_PROTOTYPE(void xencons_init, (struct tty * tp));
+_PROTOTYPE(void xencons_interrupt, (message * msg));
+_PROTOTYPE(void kputc, (int c));
+_PROTOTYPE(void do_xen_diagnostics, (message *m_ptr));
+_PROTOTYPE(void do_xen_kmess, (message *m));
+
+
 #if (CHIP == INTEL)
 /* console.c */
-_PROTOTYPE( void kputc, (int c)						);
+_PROTOTYPE(void cons_stop, (void));
+_PROTOTYPE(void do_new_kmess, (message * m));
+_PROTOTYPE(void do_diagnostics, (message * m));
+
 _PROTOTYPE( void cons_stop, (void)					);
 _PROTOTYPE( void do_new_kmess, (message *m)				);
 _PROTOTYPE( void do_diagnostics, (message *m)				);

@@ -130,36 +130,43 @@ check_runqueues(char *when)
 	kprintf("tail and tail->next not null; %s", when);
 		 panic("scheduling error", NO_NUM);
     }
-    for(xp = rdy_head[q]; xp != NIL_PROC; xp = xp->p_nextready) {
-        if (!xp->p_ready) {
-		kprintf("scheduling error: unready on runq: %s\n", when);
-		
-  		panic("found unready process on run queue", NO_NUM);
-        }
-        if (xp->p_priority != q) {
-		kprintf("scheduling error: wrong priority: %s\n", when);
-		
-		panic("wrong priority", NO_NUM);
-	}
-	if (xp->p_found) {
-		kprintf("scheduling error: double scheduling: %s\n", when);
-		panic("proc more than once on scheduling queue", NO_NUM);
-	}
-	xp->p_found = 1;
-	if (xp->p_nextready == NIL_PROC && rdy_tail[q] != xp) {
-		kprintf("scheduling error: last element not tail: %s\n", when);
-		panic("scheduling error", NO_NUM);
-	}
-	if (l++ > PROCLIMIT) panic("loop in schedule queue?", NO_NUM);
+    for (xp = rdy_head[q]; xp != NIL_PROC;
+	 xp = xp->p_nextready) {
+      if (!xp->p_ready) {
+	kprintf("scheduling error: unready on runq: %s\n", when);
+	
+	panic("found unready process on run queue", NO_NUM);
+      }
+      if (xp->p_priority != q) {
+	kprintf("scheduling error: wrong priority: %s\n", when);
+	
+	panic("wrong priority", NO_NUM);
+      }
+      if (xp->p_found) {
+	kprintf("scheduling error: double scheduling: %s\n", when);
+	panic("proc more than once on scheduling queue", NO_NUM);
+      }
+      xp->p_found = 1;
+      if (xp->p_nextready == NIL_PROC
+	  && rdy_tail[q] != xp) {
+	kprintf("scheduling error: last element not tail: %s\n", when);
+	panic("scheduling error", NO_NUM);
+      }
+      if (l++ > PROCLIMIT)
+	panic("loop in schedule queue?", NO_NUM);
     }
-  }	
+  }
 
   for (xp = BEG_PROC_ADDR; xp < END_PROC_ADDR; ++xp) {
-	if (! isemptyp(xp) && xp->p_ready && ! xp->p_found) {
-		kprintf("scheduling error: ready not on queue: %s\n", when);
-		panic("ready proc not on scheduling queue", NO_NUM);
-		if (l++ > PROCLIMIT) { panic("loop in proc.t?", NO_NUM); }
-	}
+    if (!isemptyp(xp) && xp->p_ready && !xp->p_found) {
+      kprintf("scheduling error: %x ready not on queue: %s\n",
+	      proc_nr(xp), when);
+      panic("ready proc not on scheduling queue",
+	    NO_NUM);
+      if (l++ > PROCLIMIT) {
+	panic("loop in proc.t?", NO_NUM);
+      }
+    }
   }
 }
 

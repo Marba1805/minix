@@ -31,7 +31,7 @@ register message *m_ptr;	/* pointer to request message */
   /* Hook identifiers start at 1 and end at NR_IRQ_HOOKS. */
   irq_hook_id = (unsigned) m_ptr->IRQ_HOOK_ID - 1;
   irq_vec = (unsigned) m_ptr->IRQ_VECTOR; 
-
+#if 0
   /* See what is requested and take needed actions. */
   switch(m_ptr->IRQ_REQUEST) {
 
@@ -96,6 +96,7 @@ register message *m_ptr;	/* pointer to request message */
       r = EINVAL;				/* invalid IRQ_REQUEST */
   }
   return(r);
+#endif
 }
 
 /*===========================================================================*

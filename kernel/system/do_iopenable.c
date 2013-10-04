@@ -19,10 +19,10 @@ register message *m_ptr;	/* pointer to request message */
 {
   int proc_nr;
 
-#if 1 /* ENABLE_USERPRIV && ENABLE_USERIOPL */
-  proc_nr= m_ptr->PROC_NR;
+#ifndef XEN 		/* ENABLE_USERPRIV && ENABLE_USERIOPL */
+  proc_nr = m_ptr->PROC_NR;
   if (proc_nr == SELF)
-  	proc_nr = m_ptr->m_source;
+    proc_nr = m_ptr->m_source;
   enable_iop(proc_addr(proc_nr));
   return(OK);
 #else

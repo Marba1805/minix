@@ -96,7 +96,11 @@ message *m_ptr;			/* pointer to message in the caller's space */
  * The trap is caught and sys_call() is called to send or receive a message
  * (or both). The caller is always given by 'proc_ptr'.
  */
-  register struct proc *caller_ptr = proc_ptr;	/* get pointer to caller */
+  struct proc *caller_ptr = proc_ptr;	/* get pointer to caller */
+  struct proc *caller_ptr2 = caller_ptr;
+  int function = call_nr & SYSCALL_FUNC;	/* get system call function */
+  unsigned flags = call_nr & SYSCALL_FLAGS;	/* get flags */
+  int mask_entry;		/* bit to check in send mask */
   int function = call_nr & SYSCALL_FUNC;	/* get system call function */
   unsigned flags = call_nr & SYSCALL_FLAGS;	/* get flags */
   int mask_entry;				/* bit to check in send mask */
@@ -158,14 +162,21 @@ message *m_ptr;			/* pointer to message in the caller's space */
   /* If the call is to send to a process, i.e., for SEND, SENDREC or NOTIFY,
    * verify that the caller is allowed to send to the given destination. 
    */
-  if (function & CHECK_DST) {	
-      if (! get_sys_bit(priv(caller_ptr)->s_ipc_to, nr_to_id(src_dst))) {
+
+  if (function & CHECK_DST) {
+    if (!get_sys_bit
+	(priv(caller_ptr)->s_ipc_to, nr_to_id(src_dst))) {
 #if DEBUG_ENABLE_IPC_WARNINGS
-          kprintf("sys_call: ipc mask denied trap %d from %d to %d\n",
-          	function, proc_nr(caller_ptr), src_dst);
+      xen_kprintf("%x ipc mask %x %x\n",
+		  proc_nr(caller_ptr),
+		  priv(caller_ptr)->s_ipc_to,
+		  priv(proc_addr(src_dst))->s_id);
+      kprintf
+	("sys_call: ipc mask denied trap %d from %d to %d\n",
+	 function, proc_nr(caller_ptr), src_dst);
 #endif
-          return(ECALLDENIED);		/* call denied by ipc mask */
-      }
+      return (ECALLDENIED);	/* call denied by ipc mask */
+    }
   }
 
   /* Check for a possible deadlock for blocking SEND(REC) and RECEIVE. */
@@ -282,30 +293,37 @@ unsigned flags;				/* system call flags */
  */
   register struct proc *dst_ptr = proc_addr(dst);
   register struct proc **xpp;
+  struct proc *caller_ptr2 = caller_ptr;
 
   /* Check if 'dst' is blocked waiting for this message. The destination's 
    * SENDING flag may be set when its SENDREC call blocked while sending.  
    */
-  if ( (dst_ptr->p_rts_flags & (RECEIVING | SENDING)) == RECEIVING &&
-       (dst_ptr->p_getfrom == ANY || dst_ptr->p_getfrom == caller_ptr->p_nr)) {
-	/* Destination is indeed waiting for this message. */
-	CopyMess(caller_ptr->p_nr, caller_ptr, m_ptr, dst_ptr,
-		 dst_ptr->p_messbuf);
-	if ((dst_ptr->p_rts_flags &= ~RECEIVING) == 0) enqueue(dst_ptr);
-  } else if ( ! (flags & NON_BLOCKING)) {
-	/* Destination is not waiting.  Block and dequeue caller. */
-	caller_ptr->p_messbuf = m_ptr;
-	if (caller_ptr->p_rts_flags == 0) dequeue(caller_ptr);
-	caller_ptr->p_rts_flags |= SENDING;
-	caller_ptr->p_sendto = dst;
+  if ((dst_ptr->p_rts_flags & (RECEIVING | SENDING)) == RECEIVING &&
+      (dst_ptr->p_getfrom == ANY
+       || dst_ptr->p_getfrom == caller_ptr->p_nr)) {
+    /* Destination is indeed waiting for this message. */
+    CopyMess(caller_ptr->p_nr, caller_ptr, m_ptr, dst_ptr,
+	     dst_ptr->p_messbuf);
+    if ((dst_ptr->p_rts_flags &= ~RECEIVING) == 0) {
+      enqueue(dst_ptr);
+    }
+  } else if (!(flags & NON_BLOCKING)) {
 
-	/* Process is now blocked.  Put in on the destination's queue. */
-	xpp = &dst_ptr->p_caller_q;		/* find end of list */
-	while (*xpp != NIL_PROC) xpp = &(*xpp)->p_q_link;	
-	*xpp = caller_ptr;			/* add caller to end */
-	caller_ptr->p_q_link = NIL_PROC;	/* mark new end of list */
+    /* Destination is not waiting.  Block and dequeue caller. */
+    caller_ptr->p_messbuf = m_ptr;
+    if (caller_ptr->p_rts_flags == 0)
+      dequeue(caller_ptr);
+    caller_ptr->p_rts_flags |= SENDING;
+    caller_ptr->p_sendto = dst;
+
+    /* Process is now blocked.  Put in on the destination's queue. */
+    xpp = &dst_ptr->p_caller_q;	/* find end of list */
+    while (*xpp != NIL_PROC)
+      xpp = &(*xpp)->p_q_link;
+    *xpp = caller_ptr;	/* add caller to end */
+    caller_ptr->p_q_link = NIL_PROC;	/* mark new end of list */
   } else {
-	return(ENOTREADY);
+    return(ENOTREADY);
   }
   return(OK);
 }
@@ -324,6 +342,7 @@ unsigned flags;				/* system call flags */
  * is available block the caller, unless the flags don't allow blocking.  
  */
   register struct proc **xpp;
+  struct proc *caller_ptr2;
   register struct notification **ntf_q_pp;
   message m;
   int bit_nr;
@@ -340,19 +359,23 @@ unsigned flags;				/* system call flags */
     /* Check if there are pending notifications, except for SENDREC. */
     if (! (priv(caller_ptr)->s_flags & SENDREC_BUSY)) {
 
-        map = &priv(caller_ptr)->s_notify_pending;
-        for (chunk=&map->chunk[0]; chunk<&map->chunk[NR_SYS_CHUNKS]; chunk++) {
+      map = &priv(caller_ptr)->s_notify_pending;
+      for (chunk = &map->chunk[0];
+	   chunk < &map->chunk[NR_SYS_CHUNKS]; chunk++) {
 
-            /* Find a pending notification from the requested source. */ 
-            if (! *chunk) continue; 			/* no bits in chunk */
-            for (i=0; ! (*chunk & (1<<i)); ++i) {} 	/* look up the bit */
-            src_id = (chunk - &map->chunk[0]) * BITCHUNK_BITS + i;
-            if (src_id >= NR_SYS_PROCS) break;		/* out of range */
-            src_proc_nr = id_to_nr(src_id);		/* get source proc */
+	/* Find a pending notification from the requested source. */
+	if (!*chunk)
+	  continue;	/* no bits in chunk */
+	for (i = 0; !(*chunk & (1 << i)); ++i) {
+	}	/* look up the bit */
+	src_id = (chunk - &map->chunk[0]) * BITCHUNK_BITS + i;
+	if (src_id >= NR_SYS_PROCS)
+	  break;	/* out of range */
+	src_proc_nr = id_to_nr(src_id);	/* get source proc */
 #if DEBUG_ENABLE_IPC_WARNINGS
-	    if(src_proc_nr == NONE) {
-		kprintf("mini_receive: sending notify from NONE\n");
-	    }
+	if (src_proc_nr == NONE) {
+	  xen_kprintf("mini_receive: sending notify from NONE\n");
+	}
 #endif
             if (src!=ANY && src!=src_proc_nr) continue;	/* source not ok */
             *chunk &= ~(1 << i);			/* no longer pending */
@@ -381,12 +404,23 @@ unsigned flags;				/* system call flags */
   /* No suitable message is available or the caller couldn't send in SENDREC. 
    * Block the process trying to receive, unless the flags tell otherwise.
    */
-  if ( ! (flags & NON_BLOCKING)) {
-      caller_ptr->p_getfrom = src;		
-      caller_ptr->p_messbuf = m_ptr;
-      if (caller_ptr->p_rts_flags == 0) dequeue(caller_ptr);
-      caller_ptr->p_rts_flags |= RECEIVING;		
-      return(OK);
+  if (!(flags & NON_BLOCKING)) {
+
+    caller_ptr->p_getfrom = src;
+    caller_ptr->p_messbuf = m_ptr;
+    if (caller_ptr->p_rts_flags == 0) {
+#if 0
+      if (proc_nr(caller_ptr2) == TTY_PROC_NR) {
+	xen_kprintf
+	  ("should be dequeuing.    rts_flags %x\n",
+	   caller_ptr2->p_rts_flags);
+      }
+#endif
+      dequeue(caller_ptr);
+    }
+
+    caller_ptr->p_rts_flags |= RECEIVING;
+    return (OK);
   } else {
       return(ENOTREADY);
   }
@@ -425,10 +459,19 @@ int dst;				/* which process to notify */
   /* Destination is not ready to receive the notification. Add it to the 
    * bit map with pending notifications. Note the indirectness: the system id 
    * instead of the process number is used in the pending bit map.
-   */ 
+   */
   src_id = priv(caller_ptr)->s_id;
-  set_sys_bit(priv(dst_ptr)->s_notify_pending, src_id); 
-  return(OK);
+  /*if (dst != CLOCK) {
+    xen_kprintf("*** set sys bit dst(%x) dst_ptr(%x) src_id(%x) not_pend(%x)***\n",
+    dst, dst_ptr, src_id, priv(dst_ptr)->s_notify_pending);
+    }*/
+	
+  set_sys_bit(priv(dst_ptr)->s_notify_pending, src_id);
+  /*
+    if (dst != CLOCK)
+    xen_kprintf("*** set sys bit done ***\n");
+  */
+  return (OK);
 }
 
 /*===========================================================================*
@@ -476,7 +519,8 @@ register struct proc *rp;	/* this process is now runnable */
 
 #if DEBUG_SCHED_CHECK
   check_runqueues("enqueue");
-  if (rp->p_ready) kprintf("enqueue() already ready process\n");
+  if (rp->p_ready)
+    xen_kprintf("enqueue() already ready process\n");
 #endif
 
   /* Determine where to insert to process. */
@@ -528,7 +572,9 @@ register struct proc *rp;	/* this process is no longer runnable */
 
 #if DEBUG_SCHED_CHECK
   check_runqueues("dequeue");
-  if (! rp->p_ready) kprintf("dequeue() already unready process\n");
+  if (!rp->p_ready)
+    xen_kprintf("dequeue() already unready process  %x\n",
+		proc_nr(rp));
 #endif
 
   /* Now make sure that the process is not in its ready queue. Remove the 

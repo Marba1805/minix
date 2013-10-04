@@ -89,6 +89,8 @@ struct driver *dp;	/* Device dependent entry points. */
 	/* Wait for a request to read or write a disk block. */
 	if (receive(ANY, &mess) != OK) continue;
 
+        printf("mess.type: %x\n", mess.m_type);
+	
 	device_caller = mess.m_source;
 	proc_nr = mess.PROC_NR;
 

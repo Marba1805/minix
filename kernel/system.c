@@ -53,6 +53,9 @@ PUBLIC int (*call_vec[NR_SYS_CALLS])(message *m_ptr);
 
 FORWARD _PROTOTYPE( void initialize, (void));
 
+int last_call_nr = 0;
+int last_call_id = 0;
+
 /*===========================================================================*
  *				sys_task				     *
  *===========================================================================*/
@@ -60,34 +63,41 @@ PUBLIC void sys_task()
 {
 /* Main entry point of sys_task.  Get the message and dispatch on type. */
   static message m;
+
   register int result;
   register struct proc *caller_ptr;
   unsigned int call_nr;
-  int s;
+  int s, x;
 
   /* Initialize the system task. */
   initialize();
 
   while (TRUE) {
-      /* Get work. Block and wait until a request message arrives. */
-      receive(ANY, &m);			
-      call_nr = (unsigned) m.m_type - KERNEL_CALL;	
-      caller_ptr = proc_addr(m.m_source);	
+    /* Get work. Block and wait until a request message arrives. */
+    receive(ANY, &m);
+
+    x = m.m_type;
+
+    call_nr = (unsigned) m.m_type - KERNEL_CALL;
+    caller_ptr = proc_addr(m.m_source);
 
       /* See if the caller made a valid request and try to handle it. */
       if (! (priv(caller_ptr)->s_call_mask & (1<<call_nr))) {
 #if DEBUG_ENABLE_IPC_WARNINGS
-	  kprintf("SYSTEM: request %d from %d denied.\n", call_nr,m.m_source);
+			kprintf("SYSTEM: request %d from %d denied.\n",
+				call_nr, m.m_source);
 #endif
 	  result = ECALLDENIED;			/* illegal message type */
       } else if (call_nr >= NR_SYS_CALLS) {		/* check call number */
 #if DEBUG_ENABLE_IPC_WARNINGS
-	  kprintf("SYSTEM: illegal request %d from %d.\n", call_nr,m.m_source);
+			kprintf("SYSTEM: illegal request %d from %d.\n",
+				call_nr, m.m_source);
 #endif
-	  result = EBADREQUEST;			/* illegal message type */
-      } 
-      else {
-          result = (*call_vec[call_nr])(&m);	/* handle the system call */
+			result = EBADREQUEST;	/* illegal message type */
+      } else {
+	last_call_nr = call_nr;
+	last_call_id = m.m_source;
+	result = call_vec[call_nr] (&m);	/* handle the system call */
       }
 
       /* Send a reply, unless inhibited by a handler function. Use the kernel
@@ -222,13 +232,12 @@ int source;
   source %= RANDOM_SOURCES;
   r_next= krandom.bin[source].r_next;
   if (machine.processor > 486) {
-      read_tsc(&tsc_high, &tsc_low);
-      krandom.bin[source].r_buf[r_next] = tsc_low;
-  } else {
-      krandom.bin[source].r_buf[r_next] = read_clock();
+    read_tsc(&tsc_high, &tsc_low);
+    krandom.bin[source].r_buf[r_next] = tsc_low;
   }
+
   if (krandom.bin[source].r_size < RANDOM_ELEMENTS) {
-  	krandom.bin[source].r_size ++;
+    krandom.bin[source].r_size++;
   }
   krandom.bin[source].r_next = (r_next + 1 ) % RANDOM_ELEMENTS;
 }
@@ -302,16 +311,19 @@ vir_bytes bytes;		/* # of bytes to be copied */
 
   /* Check all acceptable ranges. */
   if (vir_addr >= BIOS_MEM_BEGIN && vir_addr + bytes <= BIOS_MEM_END)
-  	return (phys_bytes) vir_addr;
-  else if (vir_addr >= BASE_MEM_TOP && vir_addr + bytes <= UPPER_MEM_END)
-  	return (phys_bytes) vir_addr;
+    return (phys_bytes) vir_addr;
+  else if (vir_addr >= BASE_MEM_TOP
+	   && vir_addr + bytes <= UPPER_MEM_END)
+    return (phys_bytes) vir_addr;
 
-#if DEAD_CODE	/* brutal fix, if the above is too restrictive */
-  if (vir_addr >= BIOS_MEM_BEGIN && vir_addr + bytes <= UPPER_MEM_END)
-  	return (phys_bytes) vir_addr;
+#if DEAD_CODE			/* brutal fix, if the above is too restrictive */
+  if (vir_addr >= BIOS_MEM_BEGIN
+      && vir_addr + bytes <= UPPER_MEM_END)
+    return (phys_bytes) vir_addr;
 #endif
 
-  kprintf("Warning, error in umap_bios, virtual address 0x%x\n", vir_addr);
+  xen_kprintf("Warning, error in umap_bios, virtual address 0x%x\n",
+	      vir_addr);
   return 0;
 }
 
@@ -339,24 +351,31 @@ vir_bytes bytes;		/* # of bytes to be copied */
    * The Atari ST behaves like the 8088 in this respect.
    */
 
-  if (bytes <= 0) return( (phys_bytes) 0);
-  if (vir_addr + bytes <= vir_addr) return 0;	/* overflow */
+  if (bytes <= 0)
+    return ((phys_bytes) 0);
+  if (vir_addr + bytes <= vir_addr)
+    return 0;	/* overflow */
   vc = (vir_addr + bytes - 1) >> CLICK_SHIFT;	/* last click of data */
 
 #if (CHIP == INTEL) || (CHIP == M68000)
   if (seg != T)
-	seg = (vc < rp->p_memmap[D].mem_vir + rp->p_memmap[D].mem_len ? D : S);
+    seg =
+      (vc <
+       rp->p_memmap[D].mem_vir +
+       rp->p_memmap[D].mem_len ? D : S);
 #else
   if (seg != T)
 	seg = (vc < rp->p_memmap[S].mem_vir ? D : S);
 #endif
 
-  if ((vir_addr>>CLICK_SHIFT) >= rp->p_memmap[seg].mem_vir + 
-  	rp->p_memmap[seg].mem_len) return( (phys_bytes) 0 );
+  if ((vir_addr >> CLICK_SHIFT) >= rp->p_memmap[seg].mem_vir +
+      rp->p_memmap[seg].mem_len) {
+    return ((phys_bytes) 0);
+  }
 
-  if (vc >= rp->p_memmap[seg].mem_vir + 
-  	rp->p_memmap[seg].mem_len) return( (phys_bytes) 0 );
-
+  if (vc >= rp->p_memmap[seg].mem_vir + rp->p_memmap[seg].mem_len) {
+    return ((phys_bytes) 0);
+  }
 #if (CHIP == INTEL)
   seg_base = (phys_bytes) rp->p_memmap[seg].mem_phys;
   seg_base = seg_base << CLICK_SHIFT;	/* segment origin in bytes */

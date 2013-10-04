@@ -9,6 +9,7 @@
  *   prepare_shutdown:	prepare to take MINIX down
  *
  * Changes:
+ *   Apr 5,  2006   Changes to allow xen added (Ivan Kelly)
  *   Nov 24, 2004   simplified main() with system image  (Jorrit N. Herder)
  *   Aug 20, 2004   new prepare_shutdown() and shutdown()  (Jorrit N. Herder)
  */
@@ -38,20 +39,23 @@ PUBLIC void main()
   int hdrindex;			/* index to array of a.out headers */
   phys_clicks text_base;
   vir_clicks text_clicks, data_clicks;
-  reg_t ktsb;			/* kernel task stack base */
-  struct exec e_hdr;		/* for a copy of an a.out header */
+  reg_t ktsb;		/* kernel task stack base */
+  struct exec *e_hdr = NULL;	/* for a copy of an a.out header */
+
+  ready_for_output = 0;
 
   /* Initialize the interrupt controller. */
-  intr_init(1);
+  init_events();
 
   /* Clear the process table. Anounce each slot as empty and set up mappings 
    * for proc_addr() and proc_nr() macros. Do the same for the table with 
    * privilege structures for the system processes. 
    */
-  for (rp = BEG_PROC_ADDR, i = -NR_TASKS; rp < END_PROC_ADDR; ++rp, ++i) {
-  	rp->p_rts_flags = SLOT_FREE;		/* initialize free slot */
-	rp->p_nr = i;				/* proc number from ptr */
-        (pproc_addr + NR_TASKS)[i] = rp;        /* proc ptr from number */
+  for (rp = BEG_PROC_ADDR, i = -NR_TASKS; rp < END_PROC_ADDR;
+       ++rp, ++i) {
+    rp->p_rts_flags = SLOT_FREE;	/* initialize free slot */
+    rp->p_nr = i;	/* proc number from ptr */
+    (pproc_addr + NR_TASKS)[i] = rp;	/* proc ptr from number */
   }
   for (sp = BEG_PRIV_ADDR, i = 0; sp < END_PRIV_ADDR; ++sp, ++i) {
 	sp->s_proc_nr = NONE;			/* initialize as free */
@@ -70,17 +74,23 @@ PUBLIC void main()
   /* Task stacks. */
   ktsb = (reg_t) t_stack;
 
-  for (i=0; i < NR_BOOT_PROCS; ++i) {
-	ip = &image[i];				/* process' attributes */
-	rp = proc_addr(ip->proc_nr);		/* get process pointer */
-	rp->p_max_priority = ip->priority;	/* max scheduling priority */
-	rp->p_priority = ip->priority;		/* current priority */
-	rp->p_quantum_size = ip->quantum;	/* quantum size in ticks */
-	rp->p_ticks_left = ip->quantum;		/* current credit */
-	strncpy(rp->p_name, ip->proc_name, P_NAME_LEN); /* set process name */
-	(void) get_priv(rp, (ip->flags & SYS_PROC));    /* assign structure */
-	priv(rp)->s_flags = ip->flags;			/* process flags */
-	priv(rp)->s_trap_mask = ip->trap_mask;		/* allowed traps */
+  xen_kprintf("si: %x  e_hdr: %x\n", hypervisor_start_info, &e_hdr);
+  for (i = 0; i < NR_BOOT_PROCS; ++i) {
+    xen_kprintf("\n=== New Process ===\n");
+
+    ip = &image[i];	/* process' attributes */
+    rp = proc_addr(ip->proc_nr);	/* get process pointer */
+    rp->p_max_priority = ip->priority;	/* max scheduling priority */
+    rp->p_quantum_size = ip->quantum;	/* quantum size in ticks */
+    rp->p_ticks_left = ip->quantum;	/* current credit */
+    strncpy(rp->p_name, ip->proc_name, P_NAME_LEN);	/* set process name */
+    xen_kprintf("Process name %s %x   p_nr: %x  proc_num %x\n",
+		rp->p_name, rp, rp->p_nr, ip->proc_nr);
+
+    (void) get_priv(rp, (ip->flags & SYS_PROC));	/* assign structure */
+    priv(rp)->s_flags = ip->flags;	/* process flags */
+    priv(rp)->s_trap_mask = ip->trap_mask;	/* allowed traps */
+
 	priv(rp)->s_call_mask = ip->call_mask;		/* kernel call mask */
 	priv(rp)->s_ipc_to.chunk[0] = ip->ipc_to;	/* restrict targets */
 	if (iskerneln(proc_nr(rp))) {		/* part of the kernel? */ 
@@ -100,19 +110,33 @@ PUBLIC void main()
 	/* The bootstrap loader created an array of the a.out headers at
 	 * absolute address 'aout'. Get one element to e_hdr.
 	 */
-	phys_copy(aout + hdrindex * A_MINHDR, vir2phys(&e_hdr),
-						(phys_bytes) A_MINHDR);
+	xen_kprintf("si: %x  e_hdr: %x\n", hypervisor_start_info,
+		    e_hdr);
+
+	e_hdr =
+	  &hypervisor_start_info->setup_info.
+	  procheaders[hdrindex].process;
+	xen_kprintf("ehdr.a_sym: %x \n", e_hdr->a_syms);
+	xen_kprintf("si->name: %s\n",
+		    hypervisor_start_info->setup_info.
+		    procheaders[hdrindex].name);
+
 	/* Convert addresses to clicks and build process memory map */
-	text_base = e_hdr.a_syms >> CLICK_SHIFT;
-	text_clicks = (e_hdr.a_text + CLICK_SIZE-1) >> CLICK_SHIFT;
-	if (!(e_hdr.a_flags & A_SEP)) text_clicks = 0;	   /* common I&D */
-	data_clicks = (e_hdr.a_total + CLICK_SIZE-1) >> CLICK_SHIFT;
+	text_base = e_hdr->a_syms >> CLICK_SHIFT;
+	text_clicks =
+	  (e_hdr->a_text + CLICK_SIZE - 1) >> CLICK_SHIFT;
+	if (!(e_hdr->a_flags & A_SEP))
+	  text_clicks = 0;	/* common I&D */
+	data_clicks =
+	  (e_hdr->a_total + CLICK_SIZE - 1) >> CLICK_SHIFT;
+
 	rp->p_memmap[T].mem_phys = text_base;
-	rp->p_memmap[T].mem_len  = text_clicks;
+	rp->p_memmap[T].mem_len = text_clicks;
 	rp->p_memmap[D].mem_phys = text_base + text_clicks;
-	rp->p_memmap[D].mem_len  = data_clicks;
-	rp->p_memmap[S].mem_phys = text_base + text_clicks + data_clicks;
-	rp->p_memmap[S].mem_vir  = data_clicks;	/* empty - stack is in data */
+	rp->p_memmap[D].mem_len = data_clicks;
+	rp->p_memmap[S].mem_phys =
+	  text_base + text_clicks + data_clicks;
+	rp->p_memmap[S].mem_vir = data_clicks;	/* empty - stack is in data */
 
 	/* Set initial register values.  The processor status word for tasks 
 	 * is different from that of other processes because tasks can
@@ -133,16 +157,27 @@ PUBLIC void main()
 	/* Set ready. The HARDWARE task is never ready. */
 	if (rp->p_nr != HARDWARE) {
 		rp->p_rts_flags = 0;		/* runnable if no flags */
-		lock_enqueue(rp);		/* add to scheduling queues */
+		lock_enqueue(rp);	/* add to scheduling queues */
 	} else {
-		rp->p_rts_flags = NO_MAP;	/* prevent from running */
+	  rp->p_rts_flags = NO_MAP;	/* prevent from running */
+#if DEBUG_SCHED_CHECK
+	  rp->p_ready = 0;
+#endif
 	}
 
 	/* Code and data segments must be allocated in protected mode. */
 	alloc_segments(rp);
+	xen_kprintf("cs: %x ds: %x ss: %x\n", rp->p_reg.cs,
+		    rp->p_reg.ds, rp->p_reg.ss);
+	xen_kprintf("cs idx: %x   ds idx: %x\n", rp->p_cs_idx,
+		    rp->p_ds_idx);
   }
 
-#if ENABLE_BOOTDEV 
+  dump_gdt(0, 20);
+  xen_kprintf("\n");
+  dump_gdt(FIRST_AVAILABLE_GDT_ENTRY, 60);
+
+#if ENABLE_BOOTDEV
   /* Expect an image of the boot device to be loaded into memory as well. 
    * The boot device is the last module that is loaded into memory, and, 
    * for example, can contain the root FS (useful for embedded systems). 
@@ -158,8 +193,20 @@ PUBLIC void main()
   /* MINIX is now ready. All boot image processes are on the ready queue.
    * Return to the assembly code to start running the current process. 
    */
-  bill_ptr = proc_addr(IDLE);		/* it has to point somewhere */
-  announce();				/* print MINIX startup banner */
+  bill_ptr = proc_addr(IDLE);	/* it has to point somewhere */
+  ready_for_output = 1;
+  kmess.km_size = kmess.km_next = 0;
+  announce();		/* print MINIX startup banner */
+
+  xen_kprintf("Next proc: %x  Cur Proc: %x\n", next_ptr, proc_ptr);
+
+  xen_kprintf("current pc = %x:0x%x, should be %x\n",
+	      (unsigned) proc_ptr->p_reg.cs,
+	      (unsigned) proc_ptr->p_reg.pc, (unsigned) CS_SELECTOR);
+  xen_kprintf("next pc = %x:0x%x, should be %x\n",
+	      (unsigned) next_ptr->p_reg.cs,
+	      (unsigned) next_ptr->p_reg.pc, (unsigned) CS_SELECTOR);
+
   restart();
 }
 
@@ -170,12 +217,15 @@ PRIVATE void announce(void)
 {
   /* Display the MINIX startup banner. */
   kprintf("\nMINIX %s.%s. "
-      "Copyright 2006, Vrije Universiteit, Amsterdam, The Netherlands\n",
-      OS_RELEASE, OS_VERSION);
-#if (CHIP == INTEL)
+	  "Copyright 2006, Vrije Universiteit, Amsterdam, The Netherlands\n",
+	  OS_RELEASE, OS_VERSION);
+#if 0
   /* Real mode, or 16/32-bit protected mode? */
   kprintf("Executing in %s mode.\n\n",
-      machine.protected ? "32-bit protected" : "real");
+	  machine.protected ? "32-bit protected" : "real");
+#endif
+#if XEN
+	kprintf("Running on Xen 2.0 hypervisor\n\n");
 #endif
 }
 
@@ -222,21 +272,31 @@ timer_t *tp;
  * monitor), RBT_MONITOR (execute given code), RBT_RESET (hard reset). 
  */
   int how = tmr_arg(tp)->ta_int;
-  u16_t magic; 
+  u16_t magic;
+
+  /*
+   * this is here so that i can attach a debugger and dump memory if theres a crash
+   */
+  while (1) {
+  }
+  hypervisor_shutdown();
 
   /* Now mask all interrupts, including the clock, and stop the clock. */
-  outb(INT_CTLMASK, ~0); 
+  outb(INT_CTLMASK, ~0);
   clock_stop();
 
   if (mon_return && how != RBT_RESET) {
-	/* Reinitialize the interrupt controllers to the BIOS defaults. */
-	intr_init(0);
-	outb(INT_CTLMASK, 0);
-	outb(INT2_CTLMASK, 0);
+    /* Reinitialize the interrupt controllers to the BIOS defaults. */
+    /*		intr_init(0);*/
+    outb(INT_CTLMASK, 0);
+    outb(INT2_CTLMASK, 0);
 
-	/* Return to the boot monitor. Set the program if not already done. */
-	if (how != RBT_MONITOR) phys_copy(vir2phys(""), kinfo.params_base, 1); 
-	level0(monitor);
+    /* Return to the boot monitor. Set the program if not already done. */
+    if (how != RBT_MONITOR)
+      phys_copy(vir2phys(""), kinfo.params_base, 1);
+#if 0
+    level1(monitor);
+#endif
   }
 
   /* Reset the system by jumping to the reset address (real mode), or by
@@ -244,7 +304,9 @@ timer_t *tp;
    * memory test by setting a soft reset flag. 
    */
   magic = STOP_MEM_CHECK;
-  phys_copy(vir2phys(&magic), SOFT_RESET_FLAG_ADDR, SOFT_RESET_FLAG_SIZE);
-  level0(reset);
+  phys_copy(vir2phys(&magic), SOFT_RESET_FLAG_ADDR,
+	    SOFT_RESET_FLAG_SIZE);
+#if 0
+  level1(reset);
+#endif
 }
-

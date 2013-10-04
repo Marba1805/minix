@@ -26,6 +26,8 @@
 #include "../../kernel/config.h"
 #include "../../kernel/type.h"
 
+#if NR_CONS > 0
+
 /* Definitions used by the console driver. */
 #define MONO_BASE    0xB0000L	/* base of mono video memory */
 #define COLOR_BASE   0xB8000L	/* base of color video memory */
@@ -970,26 +972,6 @@ message *m_ptr;			/* pointer to request message */
 }
 
 /*===========================================================================*
- *				do_get_kmess				     *
- *===========================================================================*/
-PUBLIC void do_get_kmess(m_ptr)
-message *m_ptr;			/* pointer to request message */
-{
-/* Provide the log device with debug output */
-  vir_bytes dst;
-  int r;
-
-  dst = (vir_bytes) m_ptr->GETKM_PTR;
-  r= OK;
-  if (sys_vircopy(SELF, D, (vir_bytes)&kmess, m_ptr->m_source, D,
-	dst, sizeof(kmess)) != OK) {
-	r = EFAULT;
-  }
-  m_ptr->m_type = r;
-  send(m_ptr->m_source, m_ptr);
-}
-
-/*===========================================================================*
  *				cons_putk				     *
  *===========================================================================*/
 PRIVATE void cons_putk(c)
@@ -1137,3 +1119,6 @@ int try;
   tp->tty_winsize.ws_xpixel= scr_width * 8;
   tp->tty_winsize.ws_ypixel= scr_lines * font_lines;
 }
+
+
+#endif				/* NR_CONS > 0 */

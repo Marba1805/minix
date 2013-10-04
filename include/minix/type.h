@@ -109,11 +109,13 @@ struct kinfo {
 
 struct machine {
   int pc_at;
+  int pc_xen;
   int ps_mca;
   int processor;
   int protected;
   int vdu_ega;
   int vdu_vga;
+  int vdu_xen;
 };
 
 #endif /* _TYPE_H */

@@ -99,7 +99,6 @@ typedef struct irq_hook {
   irq_policy_t policy;			/* bit mask for policy */
 } irq_hook_t;
 
-typedef int (*irq_handler_t)(struct irq_hook *);
 
 #endif /* (CHIP == INTEL) */
 

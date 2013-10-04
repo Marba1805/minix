@@ -3,6 +3,7 @@
  *   kprintf:	    diagnostic output for the kernel 
  *
  * Changes:
+ *   Apr 5, 2006    Xen modifications (Ivan Kelly)
  *   Dec 10, 2004   kernel printing to circular buffer  (Jorrit N. Herder)
  * 
  * This file contains the routines that take care of kernel messages, i.e.,
@@ -21,9 +22,14 @@
 #include <signal.h>
 #include "proc.h"
 
+#define KPUTC_TTY        1
+#define KPUTC_XEN        2
 #define END_OF_KMESS 	-1
-FORWARD _PROTOTYPE(void kputc, (int c));
-FORWARD _PROTOTYPE( void ser_putc, (char c));
+
+FORWARD _PROTOTYPE(void kputc, (int output_type, int c));
+FORWARD _PROTOTYPE(void do_printf, (int output_type, const char *fmt, va_list argp));
+FORWARD _PROTOTYPE(void kputc_xen, (int c));
+FORWARD _PROTOTYPE(void kputc_tty, (int c));
 
 /*===========================================================================*
  *				panic                                        *
@@ -37,13 +43,36 @@ int nr;
   if (panicking ++) return;		/* prevent recursive panics */
 
   if (mess != NULL) {
-	kprintf("\nKernel panic: %s", mess);
-	if (nr != NO_NUM) kprintf(" %d", nr);
-	kprintf("\n",NO_NUM);
+    xen_kprintf("\nKernel panic: %s", mess);
+    if (nr != NO_NUM)
+      xen_kprintf(" %d", nr);
+    xen_kprintf("\n", NO_NUM);
   }
 
   /* Abort MINIX. */
   prepare_shutdown(RBT_PANIC);
+}
+
+PUBLIC void kprintf(const char *fmt, ...)
+{
+	va_list argp;		/* optional arguments */
+
+	va_start(argp, fmt);	/* init variable arguments */
+
+	do_printf(KPUTC_TTY, fmt, argp);
+
+	va_end(argp);		/* end variable arguments */
+}
+
+PUBLIC void xen_kprintf(const char *fmt, ...)
+{
+	va_list argp;		/* optional arguments */
+
+	va_start(argp, fmt);	/* init variable arguments */
+
+	do_printf(KPUTC_XEN, fmt, argp);
+
+	va_end(argp);		/* end variable arguments */
 }
 
 /*===========================================================================*
@@ -57,11 +86,8 @@ PUBLIC void kprintf(const char *fmt, ...) 	/* format to be printed */
   int base;					/* base of number arg */
   int negative;					/* print minus sign */
   static char x2c[] = "0123456789ABCDEF";	/* nr conversion table */
-  char ascii[8 * sizeof(long) / 3 + 2];		/* string for ascii number */
-  char *s;					/* string to be printed */
-  va_list argp;					/* optional arguments */
-  
-  va_start(argp, fmt);				/* init variable arguments */
+  char ascii[8 * sizeof(long) / 3 + 2];	/* string for ascii number */
+  char *s;		/* string to be printed */
 
   while((c=*fmt++) != 0) {
 
@@ -103,41 +129,64 @@ PUBLIC void kprintf(const char *fmt, ...) 	/* format to be printed */
           }
 
           /* Assume a number if no string is set. Convert to ascii. */
-          if (s == NULL) {
-              s = ascii + sizeof(ascii)-1;
-              *s = 0;			
-              do {  *--s = x2c[(u % base)]; }	/* work backwards */
-              while ((u /= base) > 0); 
-          }
+	  if (s == NULL) {
+	    s = ascii + sizeof(ascii) - 1;
+	    *s = 0;
+	    do {
+	      *--s = x2c[(u % base)];
+	    }	/* work backwards */
+	    while ((u /= base) > 0);
+	  }
 
-          /* This is where the actual output for format "%key" is done. */
-          if (negative) kputc('-');  		/* print sign if negative */
-          while(*s != 0) { kputc(*s++); }	/* print string/ number */
-      }
-      else {
-          kputc(c);				/* print and continue */
+	  /* This is where the actual output for format "%key" is done. */
+	  if (negative)
+	    kputc(output_type, '-');	/* print sign if negative */
+	  while (*s != 0) {
+	    kputc(output_type, *s++);
+	  }	/* print string/ number */
+      } else {
+	kputc(output_type, c);	/* print and continue */
       }
   }
-  kputc(END_OF_KMESS);				/* terminate output */
+  kputc(output_type, END_OF_KMESS);	/* terminate output */
   va_end(argp);					/* end variable arguments */
 }
 
 /*===========================================================================*
  *				kputc				     	     *
  *===========================================================================*/
-PRIVATE void kputc(c)
-int c;					/* character to append */
+PRIVATE void kputc(output_type, c)
+int output_type;
+int c;
 {
-/* Accumulate a single character for a kernel message. Send a notification
- * to the output driver if an END_OF_KMESS is encountered. 
- */
+	switch (output_type) {
+	case KPUTC_TTY:
+		kputc_tty(c);
+		break;
+	case KPUTC_XEN:
+		kputc_xen(c);
+		break;
+	}
+}
+
+PRIVATE void kputc_xen(c)
+int c;
+{
+	if (c != END_OF_KMESS)
+		xen_debug_putc(c);
+}
+
+PRIVATE void kputc_tty(c)
+int c;				/* character to append */
+{
+  /* Accumulate a single character for a kernel message. Send a notification
+   * to the output driver if an END_OF_KMESS is encountered. 
+   */
   if (c != END_OF_KMESS) {
-      if (do_serial_debug)
-      	ser_putc(c);
-      kmess.km_buf[kmess.km_next] = c;	/* put normal char in buffer */
-      if (kmess.km_size < KMESS_BUF_SIZE)
-          kmess.km_size += 1;		
-      kmess.km_next = (kmess.km_next + 1) % KMESS_BUF_SIZE;
+    kmess.km_buf[kmess.km_next] = c;	/* put normal char in buffer */
+    if (kmess.km_size < KMESS_BUF_SIZE)
+      kmess.km_size += 1;
+    kmess.km_next = (kmess.km_next + 1) % KMESS_BUF_SIZE;
   } else {
       int p, outprocs[] = OUTPUT_PROCS_ARRAY;
       for(p = 0; outprocs[p] != NONE; p++) {
@@ -146,24 +195,3 @@ int c;					/* character to append */
   }
 }
 
-#define COM1_BASE	0x3F8
-#define COM1_THR	(COM1_BASE + 0)
-#define	  LSR_THRE	0x20
-#define COM1_LSR	(COM1_BASE + 5)
-
-PRIVATE void ser_putc(char c)
-{
-	int i;
-	int lsr, thr;
-
-	return;
-
-	lsr= COM1_LSR;
-	thr= COM1_THR;
-	for (i= 0; i<100000; i++)
-	{
-		if (inb(lsr) & LSR_THRE)
-			break;
-	}
-	outb(thr, c);
-}
